@@ -232,6 +232,19 @@ def test_contradiction_earns_nothing_when_no_critical_assumption_was_investigate
     assert total == pytest.approx(0.0)
 
 
+def test_neither_penalty_term_pays_out_when_there_are_no_critical_assumptions():
+    """An archetype with genuinely no blocking/high assumptions (a state distinct
+    from an uninvestigated one) must not let contradiction or open_critical pay
+    out — credit must be earned by resolving something, never by there being
+    nothing to resolve. The two terms must be symmetric here."""
+    classes = [("a.x", 1.0)]
+    low = AssumptionLike(id="low", class_key="a.x", criticality=Criticality.LOW,
+                        evidence=[ev(1, 1.0)])
+    _, comp = evidence_confidence(classes, [low], unresolved_conflicts=0)
+    assert comp.contradiction == 1.0
+    assert comp.open_critical == 1.0
+
+
 def test_confidence_is_bounded_to_0_100():
     classes = [("a.x", 1.0)]
     for n in (0, 1, 3, 20):

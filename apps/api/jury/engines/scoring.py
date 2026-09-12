@@ -148,22 +148,25 @@ def evidence_confidence(
     mean_strength = (sum(strength(a.evidence) for a in critical) / len(critical)
                      if critical else 0.0)
 
-    investigated_critical = [a for a in critical if a.evidence]
-    if investigated_critical:
-        contradiction = unresolved_conflicts / len(investigated_critical)
+    if not critical:
+        # No critical assumption exists to be contradicted or left open, so
+        # neither term may pay out: credit must be earned by resolving
+        # something, never by there being nothing to resolve.
+        contradiction, open_critical = 1.0, 1.0
     else:
-        # No critical assumption was investigated, so "no contradictions found"
-        # is not a clean bill of health — it is an absence of checking. Scoring
-        # it as perfect would hand 0.20 of the total to a record that learned
-        # nothing. Setting it to 1.0 makes (1 - min(1, contradiction)) pay zero,
-        # matching how open_critical already behaves in the same situation.
-        contradiction = 1.0
+        investigated_critical = [a for a in critical if a.evidence]
+        if investigated_critical:
+            contradiction = unresolved_conflicts / len(investigated_critical)
+        else:
+            # "No contradictions found" is not a clean bill of health when
+            # nothing was checked.
+            contradiction = 1.0
 
-    open_count = sum(
-        1 for a in critical
-        if assign_status(a.evidence, a.has_unresolved_conflict) in _OPEN_STATUSES
-    )
-    open_critical = open_count / max(1, len(critical))
+        open_count = sum(
+            1 for a in critical
+            if assign_status(a.evidence, a.has_unresolved_conflict) in _OPEN_STATUSES
+        )
+        open_critical = open_count / len(critical)
 
     components = ConfidenceComponents(
         coverage=cov,
@@ -208,10 +211,23 @@ def apply_gate(
     A STOP on thin evidence is as irresponsible as a PROCEED on thin evidence,
     and the gate makes both impossible to express (PRD §9.5).
     """
+    if not (math.isfinite(coverage) and math.isfinite(confidence)):
+        # NaN/inf compare False against every threshold, so an unguarded
+        # comparison would let them slip past both numeric gate conditions.
+        # A score we cannot reason about is a reason to refuse to rule.
+        return GateResult(Decision.HUNG_JURY, "non_finite_score")
+
     if coverage < COVERAGE_GATE:
         return GateResult(Decision.HUNG_JURY, "coverage_below_0.70")
 
     blocking = [a for a in assumptions if a.criticality is Criticality.BLOCKING]
+    if not blocking:
+        # Every archetype's checklist carries blocking classes, so an absence
+        # here means extraction produced nothing load-bearing. "All blocking
+        # assumptions are supported" is vacuously true over an empty list and
+        # must not be allowed to earn a PROCEED.
+        return GateResult(Decision.HUNG_JURY, "no_blocking_assumptions")
+
     for a in blocking:
         if assign_status(a.evidence, a.has_unresolved_conflict) in _OPEN_STATUSES:
             return GateResult(Decision.HUNG_JURY, "blocking_assumption_unresolved")
@@ -237,7 +253,8 @@ def apply_gate(
     all_blocking_supported = all(
         statuses[a.id] is AssumptionStatus.SUPPORTED for a in blocking
     )
-    if all_blocking_supported and economics_viable and unresolved_critical == 0:
+    if (all_blocking_supported and not refuted_critical
+            and economics_viable and unresolved_critical == 0):
         return GateResult(Decision.PROCEED, None)
 
     # Past the gate but not clean enough for PROCEED, and no refutation to act on.
