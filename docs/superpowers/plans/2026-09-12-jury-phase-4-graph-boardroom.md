@@ -77,10 +77,19 @@ async def test_every_assumption_is_scored_on_all_three_axes():
 
 
 async def test_every_assumption_is_a_single_clause():
-    """F5: 'each falsifiable and single-clause'. A conjunction is two assumptions."""
+    """F5: 'each falsifiable and single-clause'.
+
+    Tested as: one sentence, and no sequential conjunction. A naive " and " ban
+    would wrongly reject noun phrases like "supply and demand", so conjunction
+    density is reported as a metric by the Phase 7 extraction eval instead of
+    gated here.
+    """
     out = await extract_assumptions(...)
     for a in out["assumptions"]:
-        assert " and " not in a["statement"].lower() or a["statement"].count(",") == 0
+        statement = a["statement"].strip()
+        assert statement.count(".") <= 1, statement
+        assert " and then " not in statement.lower(), statement
+        assert ";" not in statement, statement
 
 
 async def test_founder_origin_is_the_default_and_no_chair_is_named():

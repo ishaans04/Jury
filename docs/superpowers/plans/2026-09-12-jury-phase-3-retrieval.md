@@ -15,7 +15,6 @@
 
 | Path | Responsibility |
 |---|---|
-| `jury/retrieval/canonical.py` | Re-exports `canonicalise_url` from `engines/dedup` (single definition) |
 | `jury/retrieval/ssrf.py` | Outbound URL allow/deny (PRD §17.4) |
 | `jury/retrieval/search.py` | `LiveSearchClient` — Brave, Tavily, Exa, HN Algolia, Reddit, Wayback |
 | `jury/retrieval/fetch.py` | `LiveFetchClient` — trafilatura → Jina Reader |
@@ -930,7 +929,8 @@ async def test_insert_verified_computes_the_dedup_hash_itself(pool):
 **Files:** Create `jury/chairs/__init__.py`, `base.py`, `market.py`; Test `tests/chairs/test_market.py`
 
 **Interfaces:**
-- `class ChairContext` dataclass: `run_id`, `project_id`, `pitch`, `target_scope`, `assumptions: list[AssumptionRecord]`, `transports: Transports`, `budgets: BudgetLedger`, `domain_map`, `trace`
+- `class ChairContext` dataclass: `run_id`, `project_id`, `pitch`, `target_scope`, `assumptions: list[AssumptionRecord]`, `transports: Transports`, `budgets: BudgetLedger`, `domain_map`, `trace`, **`pool`**, **`embedder: Embedder`**
+  (`pool` and `embedder` are required by Task 3.8's `persist_chunks`, which the shared pipeline calls once per source)
 - `async def investigate(ctx: ChairContext) -> ChairResult`
 - `ChairResult` dataclass: `inserted: list[str]`, `rejected: list[Rejection]`, `discovered: list[NewAssumption]`, `partial: bool`, `no_precedent_found: bool = False`
   (the last field is only ever set by the Precedent chair in Phase 4, but it lives on the shared dataclass so `ChairResult` has one definition across all five chairs)

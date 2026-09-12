@@ -21,9 +21,11 @@
 | `CHANGELOG.md` | Running context anchor |
 | `package.json` | npm workspace root (`apps/web`) |
 | `supabase/config.toml` | Supabase CLI local config |
-| `db/migrations/0001_schema.sql` | All 15 tables verbatim from PRD §12 |
-| `db/migrations/0002_rls.sql` | RLS policies per PRD §14.4 |
-| `db/migrations/0003_immutability.sql` | Evidence UPDATE/DELETE denial for all roles |
+| `supabase/migrations/0001_schema.sql` | All **17** tables verbatim from PRD §12 |
+| `supabase/migrations/0002_rls.sql` | RLS policies per PRD §14.4 |
+| `supabase/migrations/0003_immutability.sql` | Evidence UPDATE/DELETE denial for all roles |
+| `supabase/migrations/0004_position_deltas_chair_check.sql` | Missing chair enum CHECK (controller ruling) |
+| `db/README.md` | Pointer: migrations live under `supabase/migrations/` (deviation **D8**) |
 | `db/seed/001_assumption_classes.sql` | 45 hand-authored rows (P4) |
 | `db/seed/002_domain_tiers.sql` | Domain → tier map for PRD §16.2 |
 | `apps/api/pyproject.toml` | uv project, Python 3.12 pin, deps |
@@ -223,7 +225,7 @@ git commit -m "chore: monorepo skeleton, python 3.12 pin, env template"
 ### Task 0.2: Database schema migration
 
 **Files:**
-- Create: `db/migrations/0001_schema.sql`
+- Create: `supabase/migrations/0001_schema.sql`
 - Create: `supabase/config.toml` (via `supabase init`)
 
 **Interfaces:**
@@ -238,7 +240,7 @@ npx --yes supabase@latest start
 ```
 Expected: prints local `API URL`, `DB URL`, `anon key`, `service_role key`. Record the DB URL — it is `postgresql://postgres:postgres@127.0.0.1:54322/postgres`.
 
-- [ ] **Step 2: Write `db/migrations/0001_schema.sql`**
+- [ ] **Step 2: Write `supabase/migrations/0001_schema.sql`**
 
 Transcribed from PRD §12 with **no structural changes**. Two additions flagged in comments.
 
@@ -487,12 +489,13 @@ create index on run_events (run_id, ts);
 npx --yes supabase@latest db reset
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -c "\dt public.*" | grep -c table
 ```
-Expected: 15 public tables.
+Expected: **17** public tables (16 from this migration plus `domain_tiers` from Task 0.5).
+If `psql` is not on PATH, run the same count through a short `psycopg` script — do not skip the verification.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add supabase db/migrations/0001_schema.sql
+git add supabase supabase/migrations/0001_schema.sql
 git commit -m "feat(db): full ledger schema with enum and range constraints"
 ```
 
@@ -501,8 +504,8 @@ git commit -m "feat(db): full ledger schema with enum and range constraints"
 ### Task 0.3: RLS and database-enforced evidence immutability
 
 **Files:**
-- Create: `db/migrations/0002_rls.sql`
-- Create: `db/migrations/0003_immutability.sql`
+- Create: `supabase/migrations/0002_rls.sql`
+- Create: `supabase/migrations/0003_immutability.sql`
 - Test: `apps/api/tests/test_db_constraints.py`
 
 **Interfaces:**
@@ -525,14 +528,24 @@ def conn():
         yield c
 
 
-def _seed_minimal(conn) -> str:
-    """Create the FK chain an evidence row needs. Returns the evidence id."""
+def _seed_minimal(conn):
+    """Create the FK chain an evidence row needs.
+
+    Returns (evidence_id, project_id, run_id, assumption_id, source_id).
+
+    NOTE: auth.users is managed by Supabase Auth and has NOT NULL columns
+    beyond id/email. Verify the actual NOT NULL set against the running local
+    database and extend this insert if it rejects — do not guess.
+    """
     with conn.cursor() as cur:
-        cur.execute("insert into auth.users (id, email) values (gen_random_uuid(), 'a@b.co') "
-                    "on conflict do nothing returning id")
-        row = cur.fetchone()
-        cur.execute("select id from auth.users limit 1")
-        user_id = row[0] if row else cur.fetchone()[0]
+        cur.execute(
+            "insert into auth.users (instance_id, id, aud, role, email, "
+            " encrypted_password, created_at, updated_at) "
+            "values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), "
+            " 'authenticated', 'authenticated', "
+            " 'p0-' || gen_random_uuid() || '@test.local', '', now(), now()) "
+            "returning id")
+        user_id = cur.fetchone()[0]
 
         cur.execute("insert into projects (user_id, name, target_scope) values (%s,'p','{}') "
                     "returning id", (user_id,))
@@ -615,7 +628,7 @@ cd apps/api && uv run pytest tests/test_db_constraints.py -v
 ```
 Expected: `test_evidence_immutable_at_database_level` FAILS — the UPDATE currently succeeds because no revocation exists.
 
-- [ ] **Step 3: Write `db/migrations/0002_rls.sql`**
+- [ ] **Step 3: Write `supabase/migrations/0002_rls.sql`**
 
 ```sql
 -- RLS per PRD §14.4. Every user-owned table authorises through its project.
@@ -685,7 +698,7 @@ create policy "classes readable by all" on assumption_classes
   for select using (true);
 ```
 
-- [ ] **Step 4: Write `db/migrations/0003_immutability.sql`**
+- [ ] **Step 4: Write `supabase/migrations/0003_immutability.sql`**
 
 This is the migration that makes P6 real. Revocation covers `service_role` too, which is the part application code cannot achieve.
 
@@ -739,7 +752,7 @@ If the trigger raises `RaiseException` rather than `InsufficientPrivilege`, wide
 - [ ] **Step 6: Commit**
 
 ```bash
-git add db/migrations/0002_rls.sql db/migrations/0003_immutability.sql apps/api/tests/test_db_constraints.py
+git add supabase/migrations/0002_rls.sql supabase/migrations/0003_immutability.sql apps/api/tests/test_db_constraints.py
 git commit -m "feat(db): RLS on every table and database-enforced evidence immutability"
 ```
 
@@ -943,7 +956,7 @@ create table domain_tiers (
 alter table domain_tiers enable row level security;
 create policy "domain_tiers readable by all" on domain_tiers for select using (true);
 ```
-Table count becomes 16; update Task 0.2 Step 3's expectation.
+Table count becomes 17; Task 0.2 Step 3 already expects that.
 
 - [ ] **Step 2: Write `db/seed/002_domain_tiers.sql`**
 
@@ -985,7 +998,7 @@ Expected: rows for tiers 1–4, none for tier 5.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add db/migrations/0001_schema.sql db/seed/002_domain_tiers.sql
+git add supabase/migrations/0001_schema.sql db/seed/002_domain_tiers.sql
 git commit -m "feat(db): seed domain to source-tier map"
 ```
 

@@ -314,8 +314,11 @@ async def test_the_verdict_is_recomputed(client, auth, exp, pool):
     await client.post(f"/experiments/{exp}/result", json={"result_value": 0},
                       headers=auth)
     after = (await fetch_latest_verdict(project_id))["decision"]
-    assert after != before or True     # may legitimately hold; the row must be new
+    # Whether the DECISION changes depends on the fixture, so that is not
+    # asserted. What is required is that a fresh verdict was computed rather
+    # than the previous one carried forward.
     assert (await count_verdicts(project_id)) >= 2
+    assert after in DECISIONS
 
 
 async def test_no_evidence_row_is_mutated_by_a_return_visit(client, auth, exp, pool):

@@ -390,12 +390,25 @@ def build_transports(settings: Settings) -> Transports:
                           fetch=FixtureFetchClient(), kv=kv, offline=True)
 
     # Imported lazily so an offline environment never needs the live deps.
+    # NOTE: live search and fetch do not exist until Phase 3. Importing them
+    # here in Phase 2 would raise ImportError, so each is resolved separately
+    # and falls back to its fixture until Phase 3 extends this function.
     from jury.llm.gateway import LiveLLMClient
-    from jury.retrieval.fetch import LiveFetchClient
-    from jury.retrieval.search import LiveSearchClient
 
-    return Transports(llm=LiveLLMClient(settings), search=LiveSearchClient(settings, kv),
-                      fetch=LiveFetchClient(settings, kv), kv=kv, offline=False)
+    try:
+        from jury.retrieval.search import LiveSearchClient
+        search = LiveSearchClient(settings, kv)
+    except ImportError:
+        search = FixtureSearchClient()
+
+    try:
+        from jury.retrieval.fetch import LiveFetchClient
+        fetch = LiveFetchClient(settings, kv)
+    except ImportError:
+        fetch = FixtureFetchClient()
+
+    return Transports(llm=LiveLLMClient(settings), search=search,
+                      fetch=fetch, kv=kv, offline=False)
 ```
 
 Note: Phase 2 must create minimal real `LiveLLMClient` (Task 2.2). `LiveSearchClient` / `LiveFetchClient` land in Phase 3; until then the lazy import means only a live-mode run touches them, and `test_a_real_key_with_offline_zero_selects_live_transports` must be marked `xfail` until Phase 3 — or better, split: that test asserts only on `t.llm`, which Phase 2 does provide. Keep it asserting only `t.llm`.

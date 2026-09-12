@@ -1784,9 +1784,17 @@ def test_take_rate_breakpoint_is_exact():
 
 def test_no_breakpoint_reported_when_none_exists_in_range():
     """A parameter that cannot flip the sign anywhere in its plausible range
-    must not be given a fabricated threshold."""
+    must not be given a fabricated threshold.
+
+    fixed_monthly and the CAC parameters do not appear in the contribution
+    margin at all, so no value of them crosses zero. They must be ABSENT from
+    breakpoints, not present with an invented number.
+    """
     r = solve("marketplace_v1", MARKETPLACE)
-    assert all(b.threshold is not None for b in r.breakpoints)
+    reported = {b.variable for b in r.breakpoints}
+    assert "fixed_monthly" not in reported
+    assert "cac_supplier" not in reported
+    assert "delivery_cost" in reported          # this one genuinely has a root
 
 
 def test_breakpoints_are_never_nan_or_infinite():
