@@ -219,6 +219,19 @@ def test_open_critical_counts_no_evidence_and_uncertain():
     assert comp.open_critical == pytest.approx(0.5)
 
 
+def test_contradiction_earns_nothing_when_no_critical_assumption_was_investigated():
+    """A clean contradiction score must be earned by checking, not by absence.
+
+    Otherwise a run whose chairs all failed would display "Contradiction:
+    perfect" beside "Coverage: 0" — an unearned green tick on a hung jury.
+    """
+    classes = [("a.x", 1.0)]
+    total, comp = evidence_confidence(classes, [asm("a.x", n_evidence=0)],
+                                      unresolved_conflicts=0)
+    assert comp.contradiction == 1.0
+    assert total == pytest.approx(0.0)
+
+
 def test_confidence_is_bounded_to_0_100():
     classes = [("a.x", 1.0)]
     for n in (0, 1, 3, 20):

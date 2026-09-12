@@ -149,7 +149,15 @@ def evidence_confidence(
                      if critical else 0.0)
 
     investigated_critical = [a for a in critical if a.evidence]
-    contradiction = unresolved_conflicts / max(1, len(investigated_critical))
+    if investigated_critical:
+        contradiction = unresolved_conflicts / len(investigated_critical)
+    else:
+        # No critical assumption was investigated, so "no contradictions found"
+        # is not a clean bill of health — it is an absence of checking. Scoring
+        # it as perfect would hand 0.20 of the total to a record that learned
+        # nothing. Setting it to 1.0 makes (1 - min(1, contradiction)) pay zero,
+        # matching how open_critical already behaves in the same situation.
+        contradiction = 1.0
 
     open_count = sum(
         1 for a in critical
