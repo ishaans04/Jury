@@ -1,0 +1,33 @@
+[project]
+name = "jury-api"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "psycopg[binary,pool]>=3.2",
+  "sqlalchemy>=2.0",
+  "langgraph>=0.2.45",
+  "langgraph-checkpoint-postgres>=2.0",
+  "litellm>=1.52",
+  "httpx>=0.27",
+  "trafilatura>=1.12",
+  "numpy>=2.1",
+  "scipy>=1.14",
+  "fastembed>=0.4",
+  "python-jose[cryptography]>=3.3",
+  "tenacity>=9.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "respx>=0.21"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

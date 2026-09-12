@@ -24,3 +24,6 @@ supabase/.branches/
 # os
 .DS_Store
 Thumbs.db
+
+# sdd scratch workspace (git-ignored)
+.superpowers/
