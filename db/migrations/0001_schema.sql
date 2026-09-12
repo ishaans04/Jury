@@ -235,3 +235,11 @@ create table run_events (
 );
 create index on run_events (run_id, ts);
 
+-- Domain → tier map for rule-based tier assignment (PRD §16.2).
+create table domain_tiers (
+  domain text primary key,
+  tier   int not null check (tier between 1 and 4),
+  note   text
+);
+alter table domain_tiers enable row level security;
+create policy "domain_tiers readable by all" on domain_tiers for select using (true);
