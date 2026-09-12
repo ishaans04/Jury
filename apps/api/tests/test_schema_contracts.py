@@ -76,11 +76,16 @@ def test_criterion_spec_requires_machine_evaluable_comparator():
 
 
 def test_settings_tolerate_a_completely_empty_env(monkeypatch):
-    """Spec §3: the build must be verifiable before any credential exists."""
+    """Spec: the build must be verifiable before any credential exists.
+
+    _env_file=None is load-bearing: without it this test would silently start
+    reading a real apps/api/.env once the operator adds their keys, and would
+    then fail for a reason unrelated to the code under test.
+    """
     for k in ("GROQ_API_KEY", "BRAVE_API_KEY", "SUPABASE_SERVICE_ROLE_KEY",
               "UPSTASH_REDIS_REST_URL", "EXA_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     from jury.settings import Settings
-    s = Settings()
+    s = Settings(_env_file=None)
     assert s.groq_api_key is None
-    assert s.offline is True          # defaults to offline when unkeyed
+    assert s.offline is True
