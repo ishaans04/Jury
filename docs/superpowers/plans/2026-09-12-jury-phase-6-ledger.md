@@ -125,6 +125,29 @@ async def test_an_existing_version_is_never_overwritten(pool, seeded):
     assert await fetch_version(project_id, 1) == first
 
 
+async def test_ledger_versions_are_immutable_at_the_database_level(pool, seeded):
+    """A unique constraint on (project_id, version) stops a duplicate version
+    NUMBER; it does nothing to stop an UPDATE that rewrites an existing
+    version's snapshot or diff, and nothing to stop TRUNCATE.
+
+    Apply the same three-layer treatment evidence_items received in Phase 0:
+      revoke update, delete, truncate on ledger_versions
+        from anon, authenticated, service_role, postgres;
+      before update / before delete  -> for each row   -> raise
+      before truncate                -> for each statement -> raise
+
+    (The truncate trigger is what stops a genuine superuser, which bypasses
+    the REVOKE. This gap was found on evidence_items during Phase 0 review;
+    it is the same class of bug.)
+    """
+    await write_version(state_v1, ...)
+    for stmt in ("update ledger_versions set diff = '[]'",
+                 "delete from ledger_versions",
+                 "truncate table ledger_versions"):
+        with pytest.raises(psycopg.Error):
+            await execute_as(pool, "service_role", stmt)
+
+
 async def test_the_snapshot_and_the_diff_are_both_persisted(pool, seeded):
     out = await write_version(state_v2, ...)
     row = await fetch_version(project_id, out["version"])
@@ -555,3 +578,9 @@ async def test_another_users_project_cannot_be_exported(client, auth_b, project)
 - [ ] The kill criterion is shown beside the logged result
 - [ ] Export carries every citation, every kill criterion, and the four components
 - [ ] **Export is refused (409) when any experiment lacks a kill criterion** (P9)
+
+> **Phase 0 carry-over:** Task 6.2 must add a migration giving `ledger_versions` the same
+> three-layer immutability `evidence_items` received — `revoke update, delete, truncate`,
+> row-level UPDATE/DELETE triggers, and a statement-level TRUNCATE trigger — plus a test per
+> layer. Found during Phase 0 review: revoking only the obvious verbs leaves TRUNCATE open,
+> and TRUNCATE bypasses both RLS and row-level triggers.
