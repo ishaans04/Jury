@@ -8,7 +8,7 @@ Pure module. Callers pass data in; nothing here touches a database.
 import math
 from dataclasses import dataclass, field
 
-from jury.schemas.enums import AssumptionStatus, Criticality, Direction
+from jury.schemas.enums import AssumptionStatus, Criticality, Decision, Direction
 from jury.schemas.verdict import ConfidenceComponents
 
 # ── PRD §9.1, exact published values ─────────────────────────────────────────
@@ -171,3 +171,66 @@ def evidence_confidence(
         + CONFIDENCE_WEIGHTS["open_critical"] * (1.0 - open_critical)
     )
     return max(0.0, min(100.0, total)), components
+
+
+# ── the verdict gate: PRD §9.4 ───────────────────────────────────────────────
+# The Jury's decision is separate from Evidence Confidence and is gated by it.
+# P5: below threshold, PROCEED and STOP are structurally unreachable.
+
+COVERAGE_GATE = 0.70
+CONFIDENCE_GATE = 45.0
+
+
+@dataclass(frozen=True, slots=True)
+class GateResult:
+    decision: Decision
+    gate_triggered: str | None
+
+
+def apply_gate(
+    coverage: float,
+    assumptions: list[AssumptionLike],
+    confidence: float,
+    has_viable_adjacent: bool,
+    economics_viable: bool,
+    unresolved_critical: int,
+) -> GateResult:
+    """Return the verdict, or HUNG_JURY plus the condition that fired.
+
+    A STOP on thin evidence is as irresponsible as a PROCEED on thin evidence,
+    and the gate makes both impossible to express (PRD §9.5).
+    """
+    if coverage < COVERAGE_GATE:
+        return GateResult(Decision.HUNG_JURY, "coverage_below_0.70")
+
+    blocking = [a for a in assumptions if a.criticality is Criticality.BLOCKING]
+    for a in blocking:
+        if assign_status(a.evidence, a.has_unresolved_conflict) in _OPEN_STATUSES:
+            return GateResult(Decision.HUNG_JURY, "blocking_assumption_unresolved")
+
+    if confidence < CONFIDENCE_GATE:
+        return GateResult(Decision.HUNG_JURY, "confidence_below_45")
+
+    # Past the gate. PRD §9.4 decision table.
+    statuses = {
+        a.id: assign_status(a.evidence, a.has_unresolved_conflict) for a in assumptions
+    }
+    refuted_blocking = [a for a in blocking
+                        if statuses[a.id] is AssumptionStatus.REFUTED]
+    refuted_critical = [a for a in assumptions
+                        if a.criticality in _CRITICAL
+                        and statuses[a.id] is AssumptionStatus.REFUTED]
+
+    if refuted_blocking and not has_viable_adjacent:
+        return GateResult(Decision.STOP, None)
+    if refuted_critical and has_viable_adjacent:
+        return GateResult(Decision.PIVOT, None)
+
+    all_blocking_supported = all(
+        statuses[a.id] is AssumptionStatus.SUPPORTED for a in blocking
+    )
+    if all_blocking_supported and economics_viable and unresolved_critical == 0:
+        return GateResult(Decision.PROCEED, None)
+
+    # Past the gate but not clean enough for PROCEED, and no refutation to act on.
+    return GateResult(Decision.PIVOT, None)
