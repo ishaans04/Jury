@@ -810,6 +810,14 @@ def evidence_confidence(
     Returns both because the UI must always render the decomposition: a number
     with a visible decomposition is defensible, one without is not.
     """
+    # A record with nothing in it scores zero, not 40. Without this guard the
+    # two (1 - x) penalty terms vacuously read "perfect" when there is nothing
+    # to be contradicted or left open, handing 40% of the total to a record
+    # where nothing was investigated.
+    if not assumptions:
+        return 0.0, ConfidenceComponents(coverage=0.0, mean_strength=0.0,
+                                         contradiction=0.0, open_critical=0.0)
+
     cov = coverage(classes, assumptions)
 
     critical = [a for a in assumptions if a.criticality in _CRITICAL]
@@ -817,7 +825,13 @@ def evidence_confidence(
                      if critical else 0.0)
 
     investigated_critical = [a for a in critical if a.evidence]
-    contradiction = unresolved_conflicts / max(1, len(investigated_critical))
+    if investigated_critical:
+        contradiction = unresolved_conflicts / len(investigated_critical)
+    else:
+        # "No contradictions found" is not a clean bill of health when nothing
+        # was checked. 1.0 makes (1 - min(1, contradiction)) pay zero, matching
+        # how open_critical already behaves in the same situation, and keeps the
+        # displayed component honest on a partial or failed run (PRD §18).
 
     open_count = sum(
         1 for a in critical
