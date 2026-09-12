@@ -708,7 +708,12 @@ This is the migration that makes P6 real. Revocation covers `service_role` too, 
 -- including the service role, enforcing P6 at the database level rather than in
 -- application code."
 
-revoke update, delete on evidence_items from anon, authenticated, service_role, postgres;
+-- TRUNCATE must be revoked alongside UPDATE/DELETE. It bypasses RLS entirely
+-- (FORCE ROW LEVEL SECURITY does not apply to it) and fires no row-level
+-- trigger, so without this line service_role can wipe the whole ledger in one
+-- statement and cascade into position_deltas.
+revoke update, delete, truncate on evidence_items
+  from anon, authenticated, service_role, postgres;
 
 alter table evidence_items force row level security;   -- applies RLS to the table owner
 
@@ -735,6 +740,11 @@ create trigger evidence_no_update before update on evidence_items
   for each row execute function jury_evidence_is_immutable();
 create trigger evidence_no_delete before delete on evidence_items
   for each row execute function jury_evidence_is_immutable();
+-- TRUNCATE triggers are statement-level only; FOR EACH ROW is rejected here.
+-- This is what stops a genuine superuser (supabase_admin), which bypasses
+-- the REVOKE above.
+create trigger evidence_no_truncate before truncate on evidence_items
+  for each statement execute function jury_evidence_is_immutable();
 ```
 
 Note: the `superseded_by` pointer is set on the **superseded** row, which an insert-only table cannot do. Resolution: `superseded_by` is written on the **new** row pointing *backwards* at the row it replaces. This inverts PRD §12's implied direction and is recorded as a deviation in `CHANGELOG.md`. Readers resolve "current" as *rows not referenced by any other row's `superseded_by`*.
