@@ -185,6 +185,37 @@ def test_evidence_undeletable_against_superuser_at_database_level(admin_conn):
             cur.execute("delete from evidence_items where id = %s", (seeded.evidence_id,))
 
 
+def test_evidence_untruncatable_by_revoked_roles(conn):
+    """P6, TRUNCATE side, REVOKE-covered roles.
+
+    TRUNCATE is a distinct grantable privilege and a distinct trigger event
+    from UPDATE/DELETE in Postgres -- it bypasses RLS entirely (FORCE ROW
+    LEVEL SECURITY does not apply to it) and fires no row-level trigger. This
+    was the fix-round-1 hole: 0003_immutability.sql revoked only update/delete
+    and installed only row-level triggers, leaving TRUNCATE (which would
+    cascade into position_deltas via new_evidence_id) wide open, including to
+    service_role -- the exact role P6 names. Connects as `postgres` (this
+    file's default connection) and switches to `service_role` for the
+    statement under test, mirroring how the reviewer reproduced the exploit.
+    """
+    _seed_minimal(conn)
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with conn.cursor() as cur:
+            cur.execute("set local role service_role")
+            cur.execute("truncate evidence_items cascade")
+
+
+def test_evidence_untruncatable_by_superuser(admin_conn):
+    """P6, TRUNCATE side, against a genuine superuser. The REVOKE in
+    0005_evidence_no_truncate.sql cannot stop supabase_admin (superusers skip
+    ordinary privilege checks); only the FOR EACH STATEMENT trigger can, and
+    does."""
+    _seed_minimal(admin_conn)
+    with pytest.raises(psycopg.errors.RaiseException, match="insert-only"):
+        with admin_conn.cursor() as cur:
+            cur.execute("truncate evidence_items cascade")
+
+
 def test_dedup_hash_unique_per_project(conn):
     """P10: the same source twice must never inflate confidence."""
     seeded = _seed_minimal(conn)
