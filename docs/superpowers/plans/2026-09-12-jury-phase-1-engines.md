@@ -824,6 +824,12 @@ def evidence_confidence(
     mean_strength = (sum(strength(a.evidence) for a in critical) / len(critical)
                      if critical else 0.0)
 
+    if not critical:
+        # No critical assumption exists to be contradicted or left open, so
+        # neither penalty term may pay out: credit is earned by resolving
+        # something, never by there being nothing to resolve.
+        contradiction = open_critical = 1.0
+
     investigated_critical = [a for a in critical if a.evidence]
     if investigated_critical:
         contradiction = unresolved_conflicts / len(investigated_critical)
@@ -1085,10 +1091,22 @@ def apply_gate(
     A STOP on thin evidence is as irresponsible as a PROCEED on thin evidence,
     and the gate makes both impossible to express (PRD §9.5).
     """
+    # NaN/inf compare False against every threshold, so an unguarded comparison
+    # would let them slip past both numeric conditions. A score we cannot reason
+    # about is a reason to refuse to rule.
+    if not (math.isfinite(coverage) and math.isfinite(confidence)):
+        return GateResult(Decision.HUNG_JURY, "non_finite_score")
+
     if coverage < COVERAGE_GATE:
         return GateResult(Decision.HUNG_JURY, "coverage_below_0.70")
 
     blocking = [a for a in assumptions if a.criticality is Criticality.BLOCKING]
+    # "All blocking assumptions are supported" is vacuously true over an empty
+    # list. Every archetype's checklist carries blocking classes, so an absence
+    # here means extraction produced nothing load-bearing.
+    if not blocking:
+        return GateResult(Decision.HUNG_JURY, "no_blocking_assumptions")
+
     for a in blocking:
         if assign_status(a.evidence, a.has_unresolved_conflict) in _OPEN_STATUSES:
             return GateResult(Decision.HUNG_JURY, "blocking_assumption_unresolved")
@@ -1114,7 +1132,14 @@ def apply_gate(
     all_blocking_supported = all(
         statuses[a.id] is AssumptionStatus.SUPPORTED for a in blocking
     )
-    if all_blocking_supported and economics_viable and unresolved_critical == 0:
+    # PROCEED requires no refuted CRITICAL assumption at all, not merely that
+    # the blocking ones are supported. PRD §9.4's table is silent on a refuted
+    # HIGH assumption with no viable adjacency: it escapes STOP (blocking only)
+    # and PIVOT (needs adjacency), and would otherwise earn a clean PROCEED.
+    # The fall-through below correctly yields PIVOT — STOP stays reserved for
+    # blocking. Deviation D11.
+    if (all_blocking_supported and not refuted_critical
+            and economics_viable and unresolved_critical == 0):
         return GateResult(Decision.PROCEED, None)
 
     # Past the gate but not clean enough for PROCEED, and no refutation to act on.
