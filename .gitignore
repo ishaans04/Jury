@@ -1,0 +1,26 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# node
+node_modules/
+.next/
+out/
+.turbo/
+
+# env — never commit real keys
+.env
+.env.local
+.env*.local
+
+# supabase local
+supabase/.temp/
+supabase/.branches/
+
+# os
+.DS_Store
+Thumbs.db
