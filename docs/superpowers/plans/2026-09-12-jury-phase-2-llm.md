@@ -673,8 +673,24 @@ from jury.settings import Settings
 from jury.transport.protocols import LLMResponse
 
 MAX_LLM_CALLS_PER_RUN = 120          # PRD §17.2
-_RETRYABLE = ("429", "rate_limit", "overloaded", "timeout", "502", "503", "504")
+
+# Quota exhaustion and a transient network fault need different responses.
+# Retrying the SAME model on a 429 buys nothing — the quota is what it is, so
+# advance. A bare timeout or 5xx is not a quota signal, and one quick retry at
+# the preferred tier is cheap; without it a single network blip permanently
+# downgrades the run's highest-value calls (extraction, cross-exam, jury
+# rationale) to a weaker model.
+_QUOTA = ("429", "rate_limit", "overloaded", "quota")
+_TRANSIENT = ("timeout", "timed out", "502", "503", "504",
+              "connection", "temporarily unavailable")
 _BACKOFF_S = (0.5, 1.5, 3.0)
+
+# Policy: quota -> advance immediately, no sleep.
+#         transient -> one retry at the same tier, then advance.
+#         fatal -> advance immediately without sleeping.
+#         last tier -> retry in place for quota and transient alike, since
+#                      there is nowhere left to advance to.
+# Exhausting every tier RAISES. It never invents an answer.
 
 
 class BudgetExceeded(RuntimeError):
@@ -703,9 +719,14 @@ class LiveLLMClient:
         Walks the role's fallback chain; within each role, retries retryable
         errors with backoff before degrading to the next tier.
         """
-        if self.calls >= self._max_calls:
-            raise BudgetExceeded(
-                f"run exhausted its {self._max_calls}-call LLM budget")
+        # Reserve the slot under a lock: a bare read-then-increment lets
+        # concurrent callers both pass the check before either increments,
+        # overrunning the cap by the concurrency width. Phase 4 fans five
+        # chairs out against a shared gateway, so this is load-bearing.
+        async with self._budget_lock:
+            if self.calls >= self._max_calls:
+                raise BudgetExceeded(
+                    f"run exhausted its {self._max_calls}-call LLM budget")
 
         role: ModelRole = model if model in FALLBACK_CHAIN else "fast"
         last: Exception | None = None
@@ -753,8 +774,19 @@ import json
 from jury.transport.protocols import KV, LLMClient, LLMResponse
 
 
-def prompt_cache_key(model: str, messages: list[dict]) -> str:
-    payload = json.dumps({"m": model, "p": messages}, sort_keys=True)
+def prompt_cache_key(model: str, messages: list[dict], *,
+                     json_mode: bool = False, temperature: float = 0.0) -> str:
+    """Key on the full request shape, not just model + messages.
+
+    json_mode MUST be part of the key: without it a cached plain-text response
+    is served to a later JSON-mode caller, which never reaches the provider
+    with response_format set. That silently defeats mitigation 1 of the repair
+    loop below, turning a cache hit into a validation failure or a dropped
+    claim. temperature likewise — a deterministic call and a sampled one are
+    not interchangeable.
+    """
+    payload = json.dumps({"m": model, "p": messages,
+                          "j": json_mode, "t": temperature}, sort_keys=True)
     return "llm:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
