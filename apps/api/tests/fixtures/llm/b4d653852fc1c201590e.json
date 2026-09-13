@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": \"33333333-3333-3333-3333-333333333333\", \"new_assumption\": null, \"direction\": \"refutes\", \"variable\": null, \"value_num\": null, \"value_min\": null, \"value_max\": null, \"unit\": null, \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.7, \"source_url\": \"https://web.archive.org/web/20200601000000/http://zipledger.test/\", \"source_tier\": 1, \"excerpt\": \"We have shut down as of June 2020 and are no longer accepting new signups\", \"chair\": \"precedent\"}"
+}
