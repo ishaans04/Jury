@@ -104,12 +104,6 @@ async def fetch_chunks(pool, source_id: str) -> list[dict]:
     return [{"chunk_index": r[0], "content": r[1]} for r in rows]
 
 
-async def delete_source(pool, source_id: str) -> None:
-    async with pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("delete from sources where id = %s", (source_id,))
-
-
 # ── module-level constants ──────────────────────────────────────────────
 
 def test_the_dimension_matches_the_schema_column():
@@ -202,13 +196,29 @@ async def test_persist_chunks_on_empty_text_writes_nothing(pool):
     assert await count_chunks(pool, source_id) == 0
 
 
-async def test_chunks_cascade_when_their_source_is_deleted(pool):
-    """on delete cascade: an embedding must never outlive the row it cites
-    (PRD §11.2 dec. 3 -- the whole reason pgvector is in the same database)."""
-    source_id = await _make_source(pool, "https://x.test/embed-source-4")
-    await persist_chunks(pool, source_id, LONG_TEXT, Embedder(MemoryKV()))
-    await delete_source(pool, source_id)
-    assert await count_chunks(pool, source_id) == 0
+async def test_source_chunks_are_declared_to_cascade_from_their_source(pool):
+    """An embedding must never outlive the row it cites, which is why the FK
+    is ON DELETE CASCADE -- but the cascade is a latent guarantee here, not
+    an exercised one. `sources` is a shared, globally-deduplicated,
+    append-only cache holding nothing user-identifying (PRD §14.4), and it is
+    permanently undeletable so long as any evidence row anywhere cites it:
+    deleting a source would need a `SELECT ... FOR KEY SHARE` lock on
+    evidence_items (to check the FK from evidence_items.source_id), which
+    needs UPDATE privilege on evidence_items -- the one privilege P6
+    (0003_immutability.sql) must never grant to anyone, and
+    0008_evidence_fk_cascades.sql deliberately leaves that particular FK
+    alone (see its own comment) precisely because there is nothing about a
+    shared source that erasure needs to reach. So this asserts the
+    declaration on `source_chunks.source_id` directly via `pg_constraint`,
+    rather than a deletion the schema is designed to permanently forbid."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "select confdeltype from pg_constraint "
+                "where conname = 'source_chunks_source_id_fkey'")
+            row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == "c"          # 'c' = ON DELETE CASCADE
 
 
 # ── similar_chunks ───────────────────────────────────────────────────────

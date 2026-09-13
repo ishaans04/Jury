@@ -154,12 +154,47 @@ def test_evidence_immutable_at_database_level(conn):
             )
 
 
-def test_evidence_undeletable_at_database_level(conn):
-    """P6, delete side: same reasoning as the update test above."""
+def test_evidence_not_directly_deletable_by_any_application_role(conn):
+    """P6 narrowed (0007_evidence_delete_via_cascade.sql,
+    0008_evidence_fk_cascades.sql -- batch-N audit): corrections still
+    supersede, never update -- and no application role may issue a bare
+    DELETE either. This used to assert DELETE raised InsufficientPrivilege
+    for `postgres` too, but that REVOKE had a blast radius past its intent:
+    a referential CASCADE action runs as the table owner, so revoking DELETE
+    from the owner made it impossible to ever delete a project or an auth
+    user, both of which evidence_items.project_id/assumption_id already
+    declare ON DELETE CASCADE for. Erasure of an entire project is different
+    in kind from an in-place correction -- nothing is falsified, the record
+    is withdrawn at the owner's request -- and is reachable only via
+    cascade, never directly by any of the roles the application actually
+    connects as. See test_evidence_deletable_only_as_a_cascade below and
+    tests/test_evidence_delete_via_cascade.py's erasure tests."""
+    with conn.cursor() as cur:
+        for role in ("anon", "authenticated", "service_role"):
+            cur.execute(
+                "select has_table_privilege(%s, 'evidence_items', 'DELETE')",
+                (role,))
+            assert cur.fetchone()[0] is False, f"{role} must not hold DELETE"
+
+
+def test_evidence_deletable_only_as_a_cascade(conn):
+    """The table owner retains DELETE solely so referential actions can run:
+    a NO ACTION foreign key referencing evidence_items would force a KEY
+    SHARE lock needing UPDATE privilege, which P6 permanently denies --
+    without DELETE restored to the owner, a project or account deletion
+    could never cascade through to the evidence it owns (this is exactly
+    the failure 0007/0008 fix). Postgres has no notion of "DELETE only via
+    cascade": the same owner grant that makes the cascade possible also
+    permits this direct, targeted delete by that role -- demonstrated here
+    rather than hidden, precisely because no other role
+    (test_evidence_not_directly_deletable_by_any_application_role, above)
+    can reach it."""
     seeded = _seed_minimal(conn)
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        with conn.cursor() as cur:
-            cur.execute("delete from evidence_items where id = %s", (seeded.evidence_id,))
+    with conn.cursor() as cur:
+        cur.execute("delete from evidence_items where id = %s", (seeded.evidence_id,))
+        cur.execute("select count(*) from evidence_items where id = %s",
+                   (seeded.evidence_id,))
+        assert cur.fetchone()[0] == 0
 
 
 def test_evidence_immutable_against_superuser_at_database_level(admin_conn):
@@ -177,12 +212,19 @@ def test_evidence_immutable_against_superuser_at_database_level(admin_conn):
             )
 
 
-def test_evidence_undeletable_against_superuser_at_database_level(admin_conn):
-    """P6, delete side, against the same real superuser as above."""
+def test_evidence_deletable_by_a_superuser_too(admin_conn):
+    """P6 narrowed (0007/0008, batch-N audit): a genuine superuser
+    (supabase_admin) already bypassed the REVOKE entirely, so only the
+    BEFORE DELETE row trigger ever stopped it here -- and that trigger is
+    exactly what 0007_evidence_delete_via_cascade.sql dropped, because it
+    blocked the CASCADE this fix exists to unblock. UPDATE (the test above)
+    is untouched and still raises unconditionally, superuser included."""
     seeded = _seed_minimal(admin_conn)
-    with pytest.raises(psycopg.errors.RaiseException, match="insert-only"):
-        with admin_conn.cursor() as cur:
-            cur.execute("delete from evidence_items where id = %s", (seeded.evidence_id,))
+    with admin_conn.cursor() as cur:
+        cur.execute("delete from evidence_items where id = %s", (seeded.evidence_id,))
+        cur.execute("select count(*) from evidence_items where id = %s",
+                   (seeded.evidence_id,))
+        assert cur.fetchone()[0] == 0
 
 
 def test_evidence_untruncatable_by_revoked_roles(conn):
