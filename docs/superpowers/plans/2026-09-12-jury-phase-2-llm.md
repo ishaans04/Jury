@@ -1067,20 +1067,42 @@ def schema_prompt_block(schema: type[BaseModel]) -> str:
     return "\n".join(lines)
 
 
-def _extract_json(text: str) -> str:
-    """Small models wrap JSON in fences and chatter. Recover the object."""
-    fenced = _FENCE.search(text)
+def _json_candidates(text: str) -> list[str]:
+    """Every balanced {...} span in the response, in order.
+
+    Returning only the FIRST span is unsafe. Because the schema is embedded in
+    every prompt, a model echoing an example of that schema before its real
+    answer is a natural failure mode:
+
+        "For example your answer should look like {"name":"example","count":0}
+         Here is the actual record: {"name":"a","count":2}"
+
+    Taking the first span there returns the EXAMPLE as a clean success -- data
+    that is schema-valid but semantically wrong, with no error surfaced and no
+    escalation. A dropped claim is acceptable; a wrong row presented as correct
+    is not. So the caller validates each candidate and takes the first that
+    parses.
+    """
+    fenced = _FENCE.findall(text)
     if fenced:
-        return fenced.group(1)
-    obj = _OBJECT.search(text)
-    return obj.group(0) if obj else text.strip()
+        return fenced
+    return _balanced_spans(text)          # brace-aware, string-literal aware
 
 
 def _parse(text: str, schema: type[BaseModel]) -> tuple[BaseModel | None, str | None]:
-    try:
-        return schema.model_validate_json(_extract_json(text)), None
-    except (ValidationError, ValueError) as err:
-        return None, str(err)
+    """First candidate that VALIDATES wins; on total failure report the LAST.
+
+    The last object is far likelier to be the model's real answer than a
+    preamble example, so it is the right thing to show in the repair prompt.
+    """
+    candidates = _json_candidates(text) or [text.strip()]
+    last_error: str | None = None
+    for candidate in candidates:
+        try:
+            return schema.model_validate_json(candidate), None
+        except (ValidationError, ValueError) as err:
+            last_error = str(err)
+    return None, last_error or "no parseable object in response"
 
 
 def _coerce_scalar(text: str) -> object:
@@ -1094,7 +1116,13 @@ def _coerce_scalar(text: str) -> object:
 
 async def structured_report(
     client: LLMClient, *, role: str, prompt: str, schema: type[BaseModel],
+    trace: TraceSink | None = None,
 ) -> RepairReport:
+    """`trace` is not optional in practice: without it a dropped claim's
+    stage-by-stage history never reaches run_events, so the operator sees a
+    node that ran and produced nothing with no explanation of which stage
+    failed. Emit an llm_call row per stage attempt and an error row on drop.
+    """
     """Produce a validated instance of `schema`, or None having tried everything."""
     report = RepairReport(value=None)
     block = schema_prompt_block(schema)
