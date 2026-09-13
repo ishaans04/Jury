@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": null, \"new_assumption\": {\"statement\": \"SMB owners underprice reminder-heavy billing work out of fear of losing clients\", \"class_key\": \"saas.pain_severity\"}, \"direction\": \"supports\", \"variable\": null, \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://smbtrends.test/survey-2024\", \"source_tier\": 3, \"excerpt\": \"underprice reminder-heavy billing work out of fear of losing clients\", \"chair\": \"market\"}"
+}
