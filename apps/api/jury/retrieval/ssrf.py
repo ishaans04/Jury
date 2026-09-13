@@ -15,6 +15,32 @@ exist yet) MUST pin the outbound connection to the IP address actually
 returned by DNS and re-validate *that* address before connecting, rather
 than trusting the hostname a second time. Without that, this guard's
 protection stops at the literal-encoding bypasses it was built for.
+
+Non-ASCII hostnames are rejected wholesale rather than IDNA-normalised, and
+that has a real product cost: this guard makes every internationalised
+domain unreachable, including legitimate evidence -- a regulator's register
+or a vendor's pricing page on a non-Latin-script domain in, say, MENA, LATAM
+or SEA becomes unfetchable. The trade was taken deliberately anyway, because
+the two failure modes are not symmetric: a missed source is a documented
+absence (PRD §18's "degrade to less evidence"), while a reached metadata
+endpoint is a breach. The reason wholesale rejection was chosen over
+IDNA-encoding the host and checking *that* form is that some IDNA tables
+(the stdlib's IDNA2003/Nameprep codec, notably) fold Unicode "compatibility"
+characters down to plain ASCII -- e.g. a fullwidth Latin small letter L
+(U+FF4C) folds to plain "l", so a fullwidth-lookalike of "localhost" IDNA-
+encodes to the literal blocked name "localhost" -- whereas a genuine
+homoglyph using a *different* script (Greek omicron, Cyrillic a, ...) does
+NOT fold: it produces a distinct punycode label (e.g. "xn--lcalhost-zdg" for
+a Greek-o "localhost" lookalike), a different hostname that would require
+its own DNS registration pointed at a private address to be dangerous --
+which is DNS rebinding, already out of scope above, not a blocklist bypass.
+Both cases IDNA-encode successfully; only inspecting the *encoded* form can
+tell them apart, and getting that right means trusting a normalisation
+table's fold/reject classification for every current and future codepoint.
+If IDN evidence sources turn out to matter enough to be worth that risk, the
+principled fix is: IDNA-encode the host, then re-run the *entire* blocklist
+and IP-literal check (this function, unmodified) against the encoded ASCII
+form, rather than accepting the raw Unicode host as-is.
 """
 import ipaddress
 from urllib.parse import urlsplit
@@ -122,13 +148,19 @@ def is_fetch_allowed(url: str) -> tuple[bool, str]:
     # tables (the stdlib's IDNA2003/Nameprep codec, notably) fold certain
     # Unicode compatibility characters -- e.g. fullwidth Latin letters -- down
     # to plain ASCII, so a Unicode string that is not literally "localhost"
-    # can still IDNA-encode to it at connect time. Refusing non-ASCII hosts
-    # here closes that whole class without this guard having to reimplement
-    # (and trust) any particular normalisation table. A legitimate
-    # internationalised domain should be supplied in its ASCII/punycode
-    # (xn--...) form, which is what actually goes out over DNS anyway.
+    # can still IDNA-encode to it at connect time. Pre-encoding to punycode
+    # would NOT fix this -- for a folding form it just produces the blocked
+    # ASCII name, and for a genuine different-script homoglyph it names a
+    # distinct host (see the module docstring for the full fold-vs-distinct
+    # reasoning and the cost of rejecting wholesale). Refusing non-ASCII
+    # hosts here closes the whole class without this guard having to
+    # reimplement (and trust) any particular normalisation table.
     if not host.isascii():
-        return False, "non-ASCII hostname; encode to punycode before fetching"
+        return False, (
+            "non-ASCII hostname rejected: homoglyph and compatibility "
+            "characters can normalise to an internal name (fullwidth 'l' "
+            "folds to 'localhost')"
+        )
     if host in BLOCKED_HOSTNAMES:
         return False, f"host {host!r} is blocked"
 
