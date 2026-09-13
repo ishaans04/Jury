@@ -340,11 +340,17 @@ create table sources (
   unique (canonical_url)
 );
 
+-- NOTE on the cascades below. Every foreign key REFERENCING evidence_items must
+-- be ON DELETE CASCADE. A NO ACTION reference forces Postgres to take a
+-- SELECT ... FOR KEY SHARE lock on evidence_items during a parent delete, and
+-- that lock requires UPDATE privilege -- the one privilege P6 permanently
+-- denies. With any such FK left NO ACTION, deleting a project or an auth user
+-- becomes impossible, so a user can never erase their own data.
 -- ========== evidence: insert-only, source-backed (P1, P6, P10) ==========
 create table evidence_items (
   id            uuid primary key default gen_random_uuid(),
   project_id    uuid not null references projects(id) on delete cascade,
-  run_id        uuid not null references runs(id),
+  run_id        uuid not null references runs(id) on delete cascade,
   assumption_id uuid not null references assumptions(id) on delete cascade,
   source_id     uuid not null references sources(id),
   chair         text not null check (chair in
@@ -364,7 +370,7 @@ create table evidence_items (
   confidence    numeric not null check (confidence between 0 and 1),
   excerpt       text not null check (length(excerpt) <= 240),
   dedup_hash    text not null,
-  superseded_by uuid references evidence_items(id),
+  superseded_by uuid references evidence_items(id) on delete cascade,
   created_at    timestamptz default now(),
   unique (project_id, dedup_hash)   -- P10
 );
@@ -407,7 +413,7 @@ create table position_deltas (
   before        text not null,
   after         text not null,
   reason        text not null,
-  new_evidence_id uuid references evidence_items(id)
+  new_evidence_id uuid references evidence_items(id) on delete cascade
 );
 
 -- ========== economics ==========
