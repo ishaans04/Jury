@@ -1,0 +1,410 @@
+[
+  {
+    "url": "https://sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://www.sec.gov/Archives/edgar/data/1318605/000156459021004599/0001564590-21-004599-index.htm",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://rbi.org.in/Scripts/BS_ViewMasCirculardetails.aspx",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://www.mca.gov.in/mcafoportal/companyLLPMasterData.do",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://gst.gov.in/services/searchtp",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://www.gov.uk/government/publications/companies-house-fees",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://www.ftc.gov/news-events/news/press-releases",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://www.fda.gov/food/food-ingredients-packaging/generally-recognized-safe-gras",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://web.archive.org/web/20210101000000/https://oldstartup.test/pricing",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://web.archive.org/web/20230615000000/https://defunctco.test/",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://play.google.com/store/apps/details?id=com.spotify.music",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://apps.apple.com/us/app/notion/id1232780281",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://acmewidgets.test/pricing",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://acmewidgets.test/pricing/",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://getflowly.test/plans",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://getflowly.test/en/pricing",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://devtoolsx.test/docs/api",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://devtoolsx.test/api-reference",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://cloudsyncapp.test/developers/docs",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://cloudsyncapp.test/docs/api/pricing",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://tinycrm.test/price",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://tinycrm.test/plans/",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://billwise.test/api",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://notionclone.test/pricing",
+    "expected_tier": 1
+  },
+  {
+    "url": "https://crunchbase.com/organization/openai",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.crunchbase.com/organization/notion-so",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://data.crunchbase.com/organization/stripe",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://tracxn.com/companies/razorpay",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://data.tracxn.com/companies/x",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.CD",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.census.gov/data/tables/2023/econ/susb.html",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.statista.com/statistics/1256328/india-saas-market-size/",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.g2.com/products/hubspot/reviews",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://g2.com/products/notion/reviews",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://www.capterra.com/p/135003/Slack/reviews",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://capterra.com/p/187614/Airtable/reviews/",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://www.trustpilot.com/review/www.canva.com",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://trustpilot.com/review/notion.so",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://g2.com/products/asana/pricing",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://crunchbase.com/organization/figma/funding_rounds",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://crunchbase.com/organization/figma/company_financials",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://tracxn.com/companies/zomato/funding",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://data.worldbank.org/country/india",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.census.gov/programs-surveys/susb.html",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://statista.com/outlook/tmo/software/saas/worldwide",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.g2.com/products/salesforce/reviews",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://www.g2.com/categories/crm",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://capterra.com/categories/project-management",
+    "expected_tier": 2
+  },
+  {
+    "url": "https://www.trustpilot.com/review/airtable.com",
+    "expected_tier": 2,
+    "has_review_count": true
+  },
+  {
+    "url": "https://techcrunch.com/2026/02/14/startup-raises-series-a/",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://techcrunch.com/2025/11/03/pricing-wars-in-saas/",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://www.theinformation.com/articles/the-real-cost-of-openai",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://economictimes.indiatimes.com/tech/startups/funding-roundup",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://yourstory.com/2026/01/indian-saas-startup-funding",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://inc42.com/buzz/startup-shuts-down-after-raising-2m/",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://a16z.com/2025/the-future-of-vertical-saas/",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://failory.com/cemetery/quibb",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://autopsy.io/post-mortems/juicero",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://www.failory.com/cemetery/homejoy",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://autopsy.io/failures/theranos",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://inc42.com/features/plans-for-2026-indian-startups/",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://techcrunch.com/2026/03/01/api-wars-heat-up/",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://theinformation.com/briefing/daily-2026-03-10",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://yourstory.com/smbstory/small-business-growth-india",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://some-random-startup-blog.test/2026/notes-on-growth",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://foundersweekly.test/newsletter/issue-42",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://productmusings.test/blog/lessons-learned",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://saasinsights.test/articles/pricing-strategy-101",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://growthnotes.test/2026/how-we-scaled",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://vendorblog.test/blog/why-we-raised-prices",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://randomtechsite.test/opinion/the-future-of-work",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://smallbizjournal.test/reports/q1-2026",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://buildinpublic.test/updates/week-12",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://startupdiaries.test/interviews/founder-story",
+    "expected_tier": 3
+  },
+  {
+    "url": "https://www.reddit.com/r/startups/comments/abc123/anyone_else_struggling/",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://reddit.com/r/SaaS/comments/xyz789/pricing_feedback/",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=39182736",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=40213456",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.indiehackers.com/post/how-i-got-my-first-100-customers",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://indiehackers.com/product/notion-clone/reviews",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.producthunt.com/posts/notion-2026",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://producthunt.com/posts/acme-widgets-launch",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.quora.com/What-is-the-best-CRM-for-small-business",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://quora.com/How-do-startups-price-their-SaaS-product",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://stackoverflow.com/questions/12345678/how-to-price-an-api",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.stackoverflow.com/questions/9999999/best-practices-for-saas-pricing",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.reddit.com/r/Entrepreneur/comments/def456/pricing_advice",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://reddit.com/r/india/comments/ghi789/startup_ecosystem",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=41000111",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://indiehackers.com/post/bootstrapped-to-10k-mrr",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.producthunt.com/posts/flowly-launch",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://quora.com/Is-Crunchbase-data-accurate",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://stackoverflow.com/questions/555555/api-pricing-tiers-explained",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.reddit.com/r/webdev/comments/jkl012/freelance_rates",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=39555222",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://indiehackers.com/product/tinycrm",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.quora.com/Why-did-Quibi-fail",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://producthunt.com/posts/devtoolsx",
+    "expected_tier": 4
+  },
+  {
+    "url": "https://www.stackoverflow.com/questions/424242/pricing-api-design",
+    "expected_tier": 4
+  }
+]
