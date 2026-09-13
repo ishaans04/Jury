@@ -88,8 +88,17 @@ def assign_tier(url: str, domain_map: dict[str, int], *,
                 return rule.tier
 
     if known is not None:
-        # A review aggregate only earns tier 2 on its reviews section when the
-        # count is actually visible; a general profile page is unaffected.
+        # Scope of this gate, recorded deliberately: it only fires on a
+        # review-aggregate domain's *reviews* pages (path contains
+        # "review"), demoting an aggregate rating claim to the default tier
+        # when no sample size is visible to back it up -- an unsourced
+        # rating is not more trustworthy just because the site hosting it
+        # is generally reputable. A non-review page on the same domain
+        # (a product/category listing, a pricing comparison) is still
+        # structured third-party data and keeps tier 2 unconditionally;
+        # extending the demotion to every page on the domain would wrongly
+        # downgrade legitimate structured data that never claimed a rating
+        # in the first place.
         if known == 2 and "review" in parts.path.lower() and not has_review_count:
             return DEFAULT_TIER
         return known

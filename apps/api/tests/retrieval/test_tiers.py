@@ -30,8 +30,12 @@ def test_vendor_api_docs_are_tier1(path):
 
 
 def test_a_pricing_path_on_a_news_domain_is_not_promoted():
-    """TechCrunch writing about pricing is journalism, not a pricing page."""
-    assert assign_tier("https://techcrunch.com/2026/01/pricing-wars", MAP) == 3
+    """A news site writing about pricing is journalism, not a pricing page.
+    The URL must actually match _PRICING_PATH, or the test proves nothing
+    (a slug like 'pricing-wars' fails the regex's right-hand boundary and
+    would pass even with the domain guard deleted)."""
+    assert assign_tier("https://techcrunch.com/pricing", MAP) == 3
+    assert assign_tier("https://techcrunch.com/plans/", MAP) == 3
 
 
 def test_funding_databases_are_tier2():
@@ -41,6 +45,29 @@ def test_funding_databases_are_tier2():
 def test_review_aggregate_with_a_visible_count_is_tier2():
     assert assign_tier("https://g2.com/products/x/reviews", MAP,
                        has_review_count=True) == 2
+
+
+def test_a_review_page_without_a_visible_count_is_demoted():
+    """The concrete implementation of 'review aggregates earn tier 2 only
+    with a visible review count' -- pinned directly, since deleting the
+    guarding branch previously caused zero test failures."""
+    assert assign_tier("https://g2.com/products/x/reviews", MAP,
+                       has_review_count=False) == 3
+
+
+def test_a_review_page_with_a_visible_count_keeps_tier_2():
+    assert assign_tier("https://g2.com/products/x/reviews", MAP,
+                       has_review_count=True) == 2
+
+
+def test_a_non_review_page_on_a_review_aggregate_domain_is_unconditionally_tier2():
+    """Deliberate scope decision (see jury/retrieval/tiers.py): the
+    review-count gate only applies to a reviews page. A category or product
+    page on the same domain is still structured third-party data and is
+    tier 2 regardless of has_review_count."""
+    assert assign_tier("https://g2.com/categories/crm", MAP) == 2
+    assert assign_tier("https://g2.com/categories/crm", MAP,
+                       has_review_count=False) == 2
 
 
 def test_news_domains_are_tier3():
