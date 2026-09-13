@@ -30,18 +30,27 @@ CHAIR_BUDGETS: dict[Chair, int] = {
 # for a chair's ability to function before any credential exists (spec
 # §3.1); order otherwise carries no meaning to the ledger.
 #
-# NOTE: "producthunt" appears here (Precedent) but LiveSearchClient in
-# search.py implements only the seven providers named in the batch brief's
-# interfaces section (brave, tavily, exa, hn, reddit, wayback, playstore) --
-# "producthunt" is not one of them, even though `settings.producthunt_token`
-# exists. That looks like a real gap in the brief rather than an intentional
-# omission (see search.py's module docstring for how it's handled: routing
-# to an unimplemented provider degrades to no results, the same as routing
-# to one with a missing key, rather than raising).
+# Every provider named below must be one `LiveSearchClient` (search.py) can
+# actually service -- test_every_routed_provider_is_implemented enforces
+# this so the table and the implementation cannot silently drift apart.
+#
+# "producthunt" deliberately does NOT appear here (Precedent), even though
+# `settings.producthunt_token` exists and an earlier draft of this table
+# routed to it. Code review caught that an unimplemented provider in this
+# table is not harmless: BudgetLedger.spend has no way to know a routed
+# provider is a permanent no-op, so Phase 4's chair loop would spend one of
+# Precedent's 10 queries on a call that degrades to `search()` returning []
+# no matter what -- silently shrinking Precedent's real budget to 9 of 10.
+# Precedent is already the weakest retrieval chair in the system by a wide
+# margin (PRD framing); it can least afford to lose a tenth of its queries
+# to a call that can never return evidence. An unimplemented entry in a
+# routing table is a promise the code cannot keep, so it is left out until
+# `LiveSearchClient` actually implements a Product Hunt provider -- at which
+# point it belongs both here and in `IMPLEMENTED_PROVIDERS` (search.py).
 CHAIR_PROVIDERS: dict[Chair, tuple[str, ...]] = {
     Chair.MARKET:       ("brave", "tavily"),
     Chair.CUSTOMER:     ("hn", "reddit", "playstore", "brave"),
-    Chair.PRECEDENT:    ("exa", "brave", "wayback", "producthunt"),
+    Chair.PRECEDENT:    ("exa", "brave", "wayback"),
     Chair.DEPENDENCIES: ("brave",),
     Chair.ECONOMICS:    ("brave",),
 }

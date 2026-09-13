@@ -175,13 +175,15 @@ async def test_playstore_scraper_failure_degrades_to_empty_list(monkeypatch):
     assert await client().search(provider="playstore", query="q") == []
 
 
-# ── unrouted provider (documented brief gap: see search.py docstring) ───
+# ── unrecognised provider ─────────────────────────────────────────────
 
-async def test_an_unrouted_provider_returns_empty_list_never_raises():
-    """producthunt is in CHAIR_PROVIDERS[PRECEDENT] (budgets.py) but has no
-    dedicated LiveSearchClient method in this batch -- flagged in the
-    report rather than silently invented. It must still degrade to []."""
-    assert await client().search(provider="producthunt", query="q") == []
+async def test_an_unimplemented_provider_returns_empty_list_never_raises():
+    """No provider named in CHAIR_PROVIDERS is currently unimplemented (see
+    test_budgets.py::test_every_routed_provider_is_implemented), but
+    `search()` itself must still degrade any unrecognised provider name to
+    [] rather than raising -- this is the safety net, not the primary
+    guard against drift."""
+    assert await client().search(provider="not-a-real-provider", query="q") == []
 
 
 # ── caching: provider + query hash, 24h ──────────────────────────────────

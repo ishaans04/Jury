@@ -1,4 +1,5 @@
 from jury.retrieval.budgets import CHAIR_BUDGETS, CHAIR_PROVIDERS, BudgetLedger
+from jury.retrieval.search import IMPLEMENTED_PROVIDERS
 from jury.schemas.enums import Chair
 from jury.transport.kv import MemoryKV
 
@@ -30,6 +31,20 @@ def test_precedent_routes_to_wayback_for_death_verification():
 
 def test_precedent_routes_to_exa_for_find_similar():
     assert "exa" in CHAIR_PROVIDERS[Chair.PRECEDENT]
+
+
+def test_every_routed_provider_is_implemented():
+    """A provider named here that LiveSearchClient cannot service is a
+    promise the code cannot keep: BudgetLedger.spend has no way to know a
+    routed provider is a permanent no-op, so a chair loop spending budget
+    around a search() call for it burns a real query for guaranteed-zero
+    evidence. This caught "producthunt" being routed to Precedent with no
+    implementation (a query silently shrinking Precedent's real budget from
+    10 to 9) -- and this test is what stops the table and the
+    implementation drifting apart again, for any provider, not just that
+    one."""
+    routed = {provider for providers in CHAIR_PROVIDERS.values() for provider in providers}
+    assert routed <= IMPLEMENTED_PROVIDERS, routed - IMPLEMENTED_PROVIDERS
 
 
 async def test_a_chair_cannot_exceed_its_budget():

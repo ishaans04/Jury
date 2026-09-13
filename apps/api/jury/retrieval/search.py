@@ -14,30 +14,30 @@ Every provider method shares the same two-sided degrade contract as
     than propagating -- `search()` wraps every dispatch in one blanket
     try/except so a single flaky provider cannot crash the chair calling it.
 
-NOTE on `producthunt` and `playstore`, called out explicitly because neither
-is a clean fit for the "respx-mockable httpx call" shape the other five
-providers have:
+NOTE on `playstore`, called out explicitly because it is not a clean fit for
+the "respx-mockable httpx call" shape the other six providers have:
+`playstore` has no HTTP API of its own; the brief specifies reaching it
+through the `google-play-scraper` PyPI library (added as a project
+dependency for this batch), run via `asyncio.to_thread` since it makes
+blocking requests internally. Because it does not go through httpx, respx
+cannot intercept it -- its tests monkeypatch `google_play_scraper.search`
+directly instead. That is a deliberate, narrow exception to "use respx to
+mock HTTP": there is no HTTP call at this module's boundary for respx to
+see, but the substitution still guarantees no real network request happens
+during tests.
 
-  - `producthunt` is routed to by `CHAIR_PROVIDERS[Chair.PRECEDENT]` in
-    budgets.py, and `settings.producthunt_token` exists, but the batch
-    brief's interfaces section lists only seven provider methods for
-    `LiveSearchClient` and "producthunt" is not one of them. That reads as a
-    real gap in the brief rather than an intentional omission, so rather
-    than inventing an eighth provider method the brief never specified
-    (endpoint, auth scheme, response shape -- all unstated), `search()`
-    dispatches `producthunt` the same way it dispatches any other
-    unrecognised provider name: to an empty list. This is flagged in the
-    batch report rather than silently patched.
-
-  - `playstore` has no HTTP API of its own; the brief specifies reaching it
-    through the `google-play-scraper` PyPI library (added as a project
-    dependency for this batch), run via `asyncio.to_thread` since it makes
-    blocking requests internally. Because it does not go through httpx,
-    respx cannot intercept it -- its tests monkeypatch
-    `google_play_scraper.search` directly instead. That is a deliberate,
-    narrow exception to "use respx to mock HTTP": there is no HTTP call at
-    this module's boundary for respx to see, but the substitution still
-    guarantees no real network request happens during tests.
+`IMPLEMENTED_PROVIDERS` below is the source of truth for what this client
+can actually service. `jury/retrieval/budgets.py`'s `CHAIR_PROVIDERS`
+routes chairs to provider names as plain strings, with nothing structurally
+tying that table to this module -- so a provider could be added to the
+routing table without ever being implemented here (this happened once
+already: an earlier draft routed Precedent to "producthunt", which
+`LiveSearchClient` has never implemented, silently shrinking a real
+`BudgetLedger` spend into a guaranteed-empty call). Code review caught it;
+`test_every_routed_provider_is_implemented` (test_budgets.py) now asserts
+every provider named anywhere in `CHAIR_PROVIDERS` is a member of this set,
+so the table and the implementation cannot drift apart again without a
+failing test.
 """
 import asyncio
 import hashlib
@@ -52,6 +52,16 @@ from jury.transport.protocols import KV, SearchHit
 SEARCH_CACHE_TTL_S = 86_400
 _TIMEOUT_S = 10.0
 _WAYBACK_LIMIT = 5   # brief's literal endpoint template: "...&limit=5"
+
+# The complete set of provider names `LiveSearchClient` can actually
+# service -- i.e. every name for which a `_search_<provider>` method
+# exists. Kept as an explicit, importable constant (rather than requiring
+# callers to introspect `LiveSearchClient` with `getattr`/`dir`) precisely
+# so `budgets.py`'s routing table can be checked against it in a test
+# without either module needing to import the other's private internals.
+IMPLEMENTED_PROVIDERS: frozenset[str] = frozenset({
+    "brave", "tavily", "exa", "hn", "reddit", "wayback", "playstore",
+})
 
 
 def _cache_key(provider: str, query: str) -> str:
@@ -73,9 +83,10 @@ class LiveSearchClient:
                      limit: int = 10) -> list[SearchHit]:
         method = getattr(self, f"_search_{provider}", None)
         if method is None:
-            # Either an unrecognised provider name, or a routed-but-not-yet-
-            # implemented one (producthunt -- see module docstring). Both
-            # are documented absences, not errors.
+            # An unrecognised or not-yet-implemented provider name (not
+            # expected in practice now that CHAIR_PROVIDERS is checked
+            # against IMPLEMENTED_PROVIDERS by test, but this stays a
+            # documented absence rather than an exception either way).
             return []
 
         key = _cache_key(provider, query)
