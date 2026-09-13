@@ -1,0 +1,3 @@
+{
+  "text": "{\"archetype\": \"subscription_saas\", \"confidence\": 0.87, \"inferred_scope\": {\"geo\": \"IN\", \"segment\": \"smb\", \"tier\": null, \"period\": null}, \"reasoning\": \"GST-compliant invoicing billed monthly to Indian SMBs is a subscription SaaS product sold to a small-business budget holder.\"}"
+}
