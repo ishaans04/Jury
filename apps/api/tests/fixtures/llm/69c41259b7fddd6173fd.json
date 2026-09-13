@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumptions\": [{\"statement\": \"Buyers in this invented scenario actively look for the product today.\", \"class_key\": \"totally.invented.category\", \"origin\": \"founder\", \"discovered_by\": null, \"criticality\": \"high\", \"uncertainty\": \"uncertain\", \"falsifiability\": \"testable_now\", \"asserted_variable\": null, \"asserted_value\": null, \"asserted_unit\": null}]}"
+}

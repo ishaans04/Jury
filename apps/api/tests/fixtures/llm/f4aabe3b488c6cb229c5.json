@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumptions\": [{\"statement\": \"A chair-style claim wrongly attributed to a chair during extraction.\", \"class_key\": \"saas.pain_severity\", \"origin\": \"discovered\", \"discovered_by\": \"market\", \"criticality\": \"medium\", \"uncertainty\": \"uncertain\", \"falsifiability\": \"testable_now\", \"asserted_variable\": null, \"asserted_value\": null, \"asserted_unit\": null}]}"
+}

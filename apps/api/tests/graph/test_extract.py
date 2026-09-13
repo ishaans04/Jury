@@ -40,6 +40,14 @@ PITCH_PRICED = "We will charge 499 INR per month to Indian SMBs."
 
 PITCH_NO_FIXTURE = "A pitch with no recorded fixture, to exercise the drop path."
 
+PITCH_INVENTED_CLASS = (
+    "A pitch used only to test that an invented class_key is dropped to null."
+)
+
+PITCH_DISCOVERED_ORIGIN = (
+    "A pitch used only to test that origin is clamped to founder."
+)
+
 # subscription_saas, verbatim from db/seed/001_assumption_classes.sql.
 CLASSES: list[tuple[str, float, str]] = [
     ("saas.pain_severity", 1.0, "Is the pain acute enough to pay for?"),
@@ -152,6 +160,37 @@ async def test_a_dropped_extraction_does_not_produce_a_partial_assumption():
     out = await extract_assumptions(_state(PITCH_NO_FIXTURE), transports=_transports(),
                                     classes=CLASSES, trace=MemoryTraceSink())
     assert out["assumptions"] == []
+
+
+async def test_an_invented_class_key_is_dropped_to_null_not_trusted():
+    """The model may return a class_key that isn't on the real checklist.
+
+    coverage_gaps is safe regardless (it only iterates `classes`), but a
+    bogus key must not survive into the persisted assumption as an
+    unresolvable foreign key -- it is dropped to null, and the drop is
+    traced, while every other field on the assumption survives intact.
+    """
+    trace = MemoryTraceSink()
+    out = await extract_assumptions(_state(PITCH_INVENTED_CLASS), transports=_transports(),
+                                    classes=CLASSES, trace=trace)
+    assert out["assumptions"]
+    a = out["assumptions"][0]
+    assert a["class_key"] is None
+    assert a["statement"]
+    assert any(r["event"] == "error" and "class_key" in r["detail"].get("reason", "")
+               for r in trace.rows)
+
+
+async def test_extraction_clamps_origin_to_founder_even_if_the_model_says_otherwise():
+    """Extraction runs before any chair exists, so a 'discovered' origin with
+    a named chair here is always wrong -- clamp both fields together."""
+    out = await extract_assumptions(_state(PITCH_DISCOVERED_ORIGIN),
+                                    transports=_transports(), classes=CLASSES,
+                                    trace=MemoryTraceSink())
+    assert out["assumptions"]
+    for a in out["assumptions"]:
+        assert a["origin"] == "founder"
+        assert a["discovered_by"] is None
 
 
 # ── coverage gaps (pure function) ────────────────────────────────────────

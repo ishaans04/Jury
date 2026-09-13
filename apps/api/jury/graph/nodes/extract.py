@@ -38,6 +38,26 @@ async def extract_assumptions(state: RunState, *, transports: Transports,
     empty list, never a partially-built row: `structured_report` only ever
     hands back a fully-validated `ExtractionResult` or `None`, so there is no
     code path here that could assemble a malformed assumption from pieces.
+
+    Two normalisations run on every surviving draft, both defence in depth
+    against a model that ignores its own prompt rather than trusting it:
+
+    - `class_key` is checked against `classes` (the same checklist embedded
+      in the prompt). A key the model invents cannot manufacture a false
+      "covered" class in `coverage_gaps` -- that function only ever iterates
+      the supplied list -- but an unresolvable key could still land in the
+      ledger as a foreign key into `assumption_classes` that does not
+      resolve. An invented key is dropped to `None` rather than rejecting
+      the whole assumption: the assumption itself may still be real and
+      worth keeping, it is simply uncounted for coverage purposes. A trace
+      row is emitted so this correction is visible, not silent.
+    - `origin` is clamped to `Origin.FOUNDER` unconditionally, and
+      `discovered_by` cleared alongside it. Extraction runs before any chair
+      has investigated anything, so there is no legitimate way for a
+      "discovered" assumption to originate here -- letting one through would
+      misattribute a founder belief to a chair that never looked at it,
+      undermining the founder-vs-investigation distinction the whole
+      product is built on.
     """
     prompt = assumption_extraction_prompt(state["pitch"], classes)
     report = await structured_report(
@@ -46,15 +66,30 @@ async def extract_assumptions(state: RunState, *, transports: Transports,
     if result is None:
         return {"assumptions": []}
 
+    known_keys = {key for key, _weight, _question in classes}
+
     drafts: list[dict] = []
     for draft in result.assumptions:
-        # Defence in depth alongside the database CHECK constraint
-        # (`origin='founder'` implies `discovered_by is null`): this
-        # pipeline only ever emits founder-origin assumptions, so
-        # discovered_by is forced null regardless of what the model
-        # returned, rather than trusting it to have obeyed the prompt.
-        if draft.origin == Origin.FOUNDER and draft.discovered_by is not None:
-            draft = draft.model_copy(update={"discovered_by": None})
+        updates: dict = {}
+
+        if draft.class_key is not None and draft.class_key not in known_keys:
+            updates["class_key"] = None
+            if trace is not None:
+                await trace.emit(
+                    node="extract", event="error",
+                    detail={"reason": "class_key not in checklist; dropped to null",
+                            "invented_class_key": draft.class_key,
+                            "statement": draft.statement})
+
+        # This pipeline only ever emits founder-origin assumptions (see the
+        # docstring above) -- clamp both fields together, unconditionally,
+        # regardless of what the model actually returned.
+        if draft.origin != Origin.FOUNDER or draft.discovered_by is not None:
+            updates["origin"] = Origin.FOUNDER
+            updates["discovered_by"] = None
+
+        if updates:
+            draft = draft.model_copy(update=updates)
         drafts.append(draft.model_dump(mode="json"))
 
     return {"assumptions": drafts}
