@@ -2,6 +2,19 @@
 
 Target URLs are partly model-selected, so this is a real attack surface rather
 than a theoretical one. Blocking happens before any socket is opened.
+
+DNS is deliberately NOT resolved here. This guard only rejects requests whose
+*literal* host -- after canonicalising trailing dots, case, and encoded-IP
+forms -- is already a loopback/private/link-local/metadata address, plus a
+couple of string-level checks (scheme, credentials, non-ASCII hostnames). A
+perfectly ordinary public hostname that *resolves* to a private address (DNS
+rebinding, or just an attacker-controlled DNS record) passes this guard
+untouched -- that is a transport-layer problem, not a URL-string problem.
+Whoever implements the fetch layer (jury/transport/fetch.py, which does not
+exist yet) MUST pin the outbound connection to the IP address actually
+returned by DNS and re-validate *that* address before connecting, rather
+than trusting the hostname a second time. Without that, this guard's
+protection stops at the literal-encoding bypasses it was built for.
 """
 import ipaddress
 from urllib.parse import urlsplit
@@ -97,9 +110,25 @@ def is_fetch_allowed(url: str) -> tuple[bool, str]:
     if parts.username or parts.password:
         return False, "credentials in url"
 
-    host = (parts.hostname or "").lower()
+    # Canonicalise once, here, so every check below (blocklist and IP parser
+    # alike) sees the same form a resolver would. A trailing dot marks a DNS
+    # name as already fully-qualified -- resolvers treat "localhost." exactly
+    # like "localhost" -- and rstrip(".") collapses any number of them, so
+    # "localhost.." is caught too without needing its own case.
+    host = (parts.hostname or "").lower().rstrip(".")
     if not host:
         return False, "missing host"
+    # Non-ASCII hosts are rejected outright rather than normalised: some IDNA
+    # tables (the stdlib's IDNA2003/Nameprep codec, notably) fold certain
+    # Unicode compatibility characters -- e.g. fullwidth Latin letters -- down
+    # to plain ASCII, so a Unicode string that is not literally "localhost"
+    # can still IDNA-encode to it at connect time. Refusing non-ASCII hosts
+    # here closes that whole class without this guard having to reimplement
+    # (and trust) any particular normalisation table. A legitimate
+    # internationalised domain should be supplied in its ASCII/punycode
+    # (xn--...) form, which is what actually goes out over DNS anyway.
+    if not host.isascii():
+        return False, "non-ASCII hostname; encode to punycode before fetching"
     if host in BLOCKED_HOSTNAMES:
         return False, f"host {host!r} is blocked"
 

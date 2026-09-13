@@ -1,6 +1,11 @@
 import pytest
 
-from jury.retrieval.ssrf import BlockedURL, assert_fetch_allowed, is_fetch_allowed
+from jury.retrieval.ssrf import (
+    BLOCKED_HOSTNAMES,
+    BlockedURL,
+    assert_fetch_allowed,
+    is_fetch_allowed,
+)
 
 
 @pytest.mark.parametrize("url", [
@@ -92,3 +97,55 @@ def test_bare_integer_exceeding_ipv4_range_is_not_mistaken_for_a_private_ip():
     literal IP is actually being expressed."""
     allowed, _ = is_fetch_allowed("http://4294967296/")
     assert allowed is True
+
+
+# --- Round-1 fix: a trailing dot bypassed every check, because neither the
+# exact-string blocklist nor the IP-literal parser canonicalised the host
+# first. A trailing dot marks a DNS name as already fully-qualified, and
+# standard resolvers treat "localhost." identically to "localhost" -- so
+# every one of these six previously returned (True, "ok").
+
+@pytest.mark.parametrize("url", [
+    "http://localhost./admin",
+    "http://metadata./x",
+    "http://metadata.google.internal./x",
+    "http://instance-data./x",
+    "http://169.254.169.254./latest/meta-data/",
+    "http://127.0.0.1./",
+])
+def test_a_trailing_dot_does_not_bypass_the_blocklist(url):
+    assert is_fetch_allowed(url)[0] is False
+
+
+def test_multiple_trailing_dots_do_not_bypass_the_blocklist():
+    assert is_fetch_allowed("http://localhost../admin")[0] is False
+    assert is_fetch_allowed("http://169.254.169.254../x")[0] is False
+
+
+@pytest.mark.parametrize("host", sorted(BLOCKED_HOSTNAMES))
+def test_every_blocked_hostname_is_still_blocked_with_a_trailing_dot(host):
+    """A future addition to BLOCKED_HOSTNAMES should inherit trailing-dot
+    protection automatically, rather than needing its own bypass test."""
+    assert is_fetch_allowed(f"http://{host}./x")[0] is False
+    assert is_fetch_allowed(f"http://{host}../x")[0] is False
+
+
+def test_a_fullwidth_homoglyph_of_a_blocked_hostname_is_rejected():
+    """'lｏcalhost' (fullwidth Latin small letter O, U+FF4F) is not the
+    literal string 'localhost' and isn't caught by exact blocklist
+    comparison -- but Python's own stdlib IDNA2003/Nameprep codec folds it
+    down to the ASCII bytes b'localhost' on encode, so a client that IDNA-
+    encodes before connecting would still reach loopback. Verified directly:
+    'lｏcalhost'.encode('idna') == b'localhost'. Rather than trying to
+    correctly replicate (and trust) any particular normalisation table, the
+    guard rejects non-ASCII hostnames outright."""
+    assert "lｏcalhost".encode("idna") == b"localhost"  # documents the risk
+    allowed, reason = is_fetch_allowed("http://lｏcalhost/x")
+    assert allowed is False
+    assert "ascii" in reason.lower()
+
+
+def test_non_ascii_hostnames_are_rejected_even_when_not_a_known_alias():
+    """The guard doesn't try to detect aliasing -- it refuses all non-ASCII
+    hosts, which closes the whole class rather than one example of it."""
+    assert is_fetch_allowed("http://例.test/x")[0] is False
