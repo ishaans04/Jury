@@ -45,6 +45,16 @@ that paywalled or 404'd a minute ago is not meaningfully more fetchable now,
 and re-hitting it inside the same window only spends budget for no new
 evidence — see the module's test suite and the batch report for the fuller
 reasoning.
+
+The cache is an optimisation, never load-bearing for correctness: a KV read
+or write failure degrades to an uncached live fetch rather than propagating,
+the same way a non-2xx response degrades to a rejected `FetchResult` rather
+than an exception. httpx also has its own sharp edge here: it builds the
+redirect request eagerly (to populate `response.next_request`/`.history`)
+even with `follow_redirects=False`, so a `Location` header that doesn't parse
+as a URL raises `httpx.InvalidURL` -- which is *not* an `httpx.HTTPError`
+subclass -- before our own per-hop SSRF recheck ever runs. That is caught
+explicitly below rather than allowed to crash the fetch.
 """
 import json
 from urllib.parse import urljoin
@@ -97,13 +107,28 @@ class LiveFetchClient:
         assert_fetch_allowed(url)
 
         canonical = canonicalise_url(url)
-        cached = await self._kv.get(_cache_key(canonical))
+        cached = await self._kv_get(_cache_key(canonical))
         if cached is not None:
             return _deserialize(cached)
 
         result = await self._fetch_live(url)
-        await self._kv.set(_cache_key(canonical), _serialize(result), ttl_s=_DEDUP_TTL_S)
+        await self._kv_set(_cache_key(canonical), _serialize(result), _DEDUP_TTL_S)
         return result
+
+    async def _kv_get(self, key: str) -> str | None:
+        """The cache is an optimisation, never load-bearing for correctness: a
+        backend hiccup (network blip, Upstash returning a non-2xx) degrades to
+        an uncached live fetch rather than crashing verification."""
+        try:
+            return await self._kv.get(key)
+        except Exception:
+            return None
+
+    async def _kv_set(self, key: str, value: str, ttl_s: int) -> None:
+        try:
+            await self._kv.set(key, value, ttl_s=ttl_s)
+        except Exception:
+            pass
 
     async def _fetch_live(self, url: str) -> FetchResult:
         current = url
@@ -112,6 +137,13 @@ class LiveFetchClient:
             for _ in range(_MAX_REDIRECTS):
                 try:
                     response = await http.get(current)
+                except httpx.InvalidURL:
+                    # See the module docstring: httpx raises this while
+                    # eagerly building a redirect request, before our own
+                    # per-hop SSRF recheck below ever gets a chance to run.
+                    # Treat a malformed redirect target exactly like one our
+                    # guard refused to follow.
+                    return FetchResult(url=current, status=_REDIRECT_BLOCKED_STATUS, text="")
                 except httpx.HTTPError:
                     return FetchResult(url=current, status=502, text="")
 
@@ -147,7 +179,11 @@ class LiveFetchClient:
         itself is a fixed, trusted host, so it is not re-checked."""
         try:
             response = await http.get(f"{JINA_PREFIX}{url}")
-        except httpx.HTTPError:
+        except (httpx.HTTPError, httpx.InvalidURL):
+            # Same blind spot as the tier-1 loop above: httpx.InvalidURL is
+            # not an httpx.HTTPError subclass. Here it just means tier 2
+            # didn't pan out either; the caller falls back to whatever
+            # tier-1 text it already has.
             return None
         if not (200 <= response.status_code < 300):
             return None

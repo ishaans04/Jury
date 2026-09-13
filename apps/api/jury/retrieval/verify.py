@@ -66,12 +66,23 @@ async def verify_claim(claim: ClaimRecord, fetch: FetchClient, *,
     if not allowed:
         return Rejection(claim, f"blocked url: {reason}")
 
-    result = await fetch.fetch(claim.source_url)
+    # This is the integrity gate: nothing downstream may crash the run because
+    # a transport it does not control (a live client, a cache backend behind
+    # it, a fixture with a bad recording) misbehaved. A dropped claim is
+    # correct behaviour here (PRD §18: degrade to less evidence); a crashed
+    # chair is not. Any exception from the fetch call itself -- not just a
+    # non-2xx response -- becomes a Rejection.
+    try:
+        result = await fetch.fetch(claim.source_url)
+    except Exception as exc:  # noqa: BLE001 - deliberately blanket, see above
+        return Rejection(claim, f"fetch raised {type(exc).__name__}: {exc}")
+
     if not (200 <= result.status < 300):
         return Rejection(claim, f"source returned http {result.status}")
-    if not result.text.strip():
+    text = result.text if isinstance(result.text, str) else ""
+    if not text.strip():
         return Rejection(claim, "source returned no extractable text")
-    if not excerpt_is_present(claim.excerpt, result.text):
+    if not excerpt_is_present(claim.excerpt, text):
         return Rejection(claim, "excerpt absent from the extracted text")
 
     tier = assign_tier(claim.source_url, domain_map)
@@ -80,4 +91,4 @@ async def verify_claim(claim: ClaimRecord, fetch: FetchClient, *,
 
     return VerifiedClaim(claim=claim, tier=tier,
                          canonical_url=canonicalise_url(claim.source_url),
-                         extracted_text=result.text, http_status=result.status)
+                         extracted_text=text, http_status=result.status)
