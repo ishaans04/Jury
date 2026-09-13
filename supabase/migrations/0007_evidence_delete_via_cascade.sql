@@ -1,0 +1,58 @@
+-- Fix round 3 (batch-N audit, embeddings/chairs work): DELETE was revoked from
+-- every role in 0003_immutability.sql, including the table owner ("postgres"
+-- locally). That correctly closes P6's actual falsification vector -- an
+-- evidence row rewritten or struck out while its project still exists -- but
+-- its blast radius is much larger than intended, because the schema already
+-- commits to evidence being deletable via cascade:
+--
+--   evidence_items.project_id    references projects(id)    on delete cascade
+--   evidence_items.assumption_id references assumptions(id) on delete cascade
+--   projects.user_id             references auth.users(id)  on delete cascade
+--
+-- A referential action (the CASCADE) runs with the privileges of the
+-- REFERENCING table's owner, not with the privileges of whichever role
+-- issued the original DELETE. Revoking DELETE on evidence_items from
+-- postgres -- the table's owner -- therefore made every one of those
+-- cascades fail for everyone, not just for anon/authenticated/service_role
+-- as intended:
+--
+--   DELETE a project (user deleting their own idea) -> permission denied
+--     for table evidence_items
+--   DELETE the auth user (account deletion)          -> permission denied
+--     for table evidence_items
+--   DELETE an orphaned/never-cited source row        -> permission denied
+--     for table evidence_items (Postgres's own FK-existence check needs a
+--     `SELECT ... FOR KEY SHARE` lock on evidence_items, which needs UPDATE
+--     privilege -- also revoked -- even when zero evidence rows would
+--     actually be touched)
+--
+-- This product stores user-authored pitches; a user being unable to ever
+-- delete their own project, or close their account, is not an acceptable
+-- side effect of an integrity guarantee.
+--
+-- Ruling: P6 exists to stop evidence being falsified IN PLACE -- a row
+-- silently rewritten (UPDATE) or the whole ledger silently emptied
+-- (TRUNCATE) while the project it documents still exists. Erasing a project
+-- (or account) entirely, at its owner's explicit request, is a different act
+-- in kind: nothing is misrepresented -- the record ceases to exist because
+-- its owner asked for that, which is exactly what `ON DELETE CASCADE` is
+-- for. UPDATE and TRUNCATE are untouched by this migration and remain
+-- absolutely shut for every role, including a genuine superuser -- they stay
+-- the falsification and bulk-destruction vectors P6 is actually about.
+--
+-- So, DELETE only, three changes:
+--   1. Left revoked for anon, authenticated, service_role (no change needed:
+--      0003_immutability.sql's REVOKE already covers them) -- no application
+--      code path can ever issue a bare `DELETE FROM evidence_items ...`.
+--   2. Restored to the table owner, because the CASCADE from
+--      projects/assumptions/auth.users executes as the owner, never as the
+--      role that started the delete.
+--   3. The `evidence_no_delete` BEFORE DELETE row trigger is dropped: with
+--      DELETE privilege alone restored, that trigger would still fire on
+--      every cascaded row and raise unconditionally, blocking the very
+--      cascade this migration exists to unblock. The UPDATE and TRUNCATE
+--      triggers (`evidence_no_update`, `evidence_no_truncate`) are left
+--      exactly as they are -- they are what still makes P6 hold against a
+--      genuine superuser that bypasses every GRANT/REVOKE.
+grant delete on evidence_items to postgres;
+drop trigger evidence_no_delete on evidence_items;
