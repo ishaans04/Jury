@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": null, \"new_assumption\": {\"statement\": \"Users churn from invoicing tools once the free trial ends\", \"class_key\": \"saas.retention\"}, \"direction\": \"refutes\", \"variable\": null, \"value_num\": null, \"value_min\": null, \"value_max\": null, \"unit\": null, \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.55, \"source_url\": \"https://news.ycombinator.com/item?id=40011122\", \"source_tier\": 3, \"excerpt\": \"they churn from invoicing tools within a month once the free trial ends\", \"chair\": \"customer\"}"
+}

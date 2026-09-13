@@ -105,6 +105,7 @@ class ChairResult:
 
 QueryBuilder = Callable[[ChairContext], list[str]]
 PromptBuilder = Callable[[ChairContext, SearchHit, str], str]
+ClaimGuard = Callable[[ClaimRecord], str | None]
 
 
 def _domain_of(url: str) -> str:
@@ -123,10 +124,22 @@ async def _emit_fetch_trace(ctx: ChairContext, chair: Chair, url: str, status: i
 
 async def run_chair(ctx: ChairContext, *, chair: Chair, provider: str, llm_role: str,
                     build_queries: QueryBuilder, build_prompt: PromptBuilder,
-                    search_limit: int = DEFAULT_SEARCH_LIMIT) -> ChairResult:
+                    search_limit: int = DEFAULT_SEARCH_LIMIT,
+                    claim_guard: ClaimGuard | None = None) -> ChairResult:
     """The pipeline every chair shares. See the module docstring for the
     ordering guarantee and the decisions this function makes on the brief's
-    behalf."""
+    behalf.
+
+    `claim_guard` (Task 4.2, added for Dependencies) is an optional
+    chair-specific check that runs on the raw extracted `ClaimRecord`,
+    strictly BEFORE `verify_claim` -- i.e. before any network fetch of the
+    claim's source is attempted for verification purposes, and long before
+    any source/evidence row could be written. It returns a rejection reason
+    string to reject the claim (appended to `result.rejected` exactly like a
+    `verify_claim` rejection, so callers cannot tell the two apart by shape)
+    or `None` to let the claim proceed through the normal integrity gate.
+    Every other chair passes `None` and this parameter changes nothing about
+    their behaviour."""
     result = ChairResult()
     known_assumption_ids = {a.id for a in ctx.assumptions}
     source_repo = SourceRepo(ctx.pool)
@@ -165,6 +178,12 @@ async def run_chair(ctx: ChairContext, *, chair: Chair, provider: str, llm_role:
                 # stage vanishes silently rather than becoming a gap the
                 # caller must special-case.
                 continue
+
+            if claim_guard is not None:
+                guard_reason = claim_guard(claim)
+                if guard_reason is not None:
+                    result.rejected.append(Rejection(claim, guard_reason))
+                    continue
 
             verified_or_rejection = await verify_claim(
                 claim, ctx.transports.fetch, domain_map=ctx.domain_map)

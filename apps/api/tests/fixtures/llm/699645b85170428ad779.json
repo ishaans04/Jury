@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": \"22222222-2222-2222-2222-222222222222\", \"new_assumption\": null, \"direction\": \"refutes\", \"variable\": null, \"value_num\": null, \"value_min\": null, \"value_max\": null, \"unit\": null, \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://news.ycombinator.com/item?id=39912345\", \"source_tier\": 3, \"excerpt\": \"the free tier doesn't support GST-compliant invoices, so we switched to a spreadsheet instead\", \"chair\": \"customer\"}"
+}
