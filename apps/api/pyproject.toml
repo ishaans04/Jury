@@ -19,6 +19,7 @@ dependencies = [
   "fastembed>=0.4",
   "python-jose[cryptography]>=3.3",
   "tenacity>=9.0",
+  "google-play-scraper>=1.2.7",
 ]
 
 [dependency-groups]
