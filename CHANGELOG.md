@@ -158,9 +158,83 @@ Closed by migration `0005`: `truncate` added to the REVOKE list plus a **stateme
 ---
 
 
-## Phase 1 — Deterministic engines
+## Phase 1 — Deterministic engines ✅
 
-_Not started._
+**Completed 2026-09-13.** Commits `6cb6e47`..`b04bace` on `build/jury-phases-0-7`.
+
+Every engine that decides anything, as a pure function over typed inputs. No network, no database, no credentials. This is the layer PRD §23.1 slide 8 is about — *"the strongest line is the one about where AI is not used."*
+
+### What was built
+
+| Task | Module | Deliverable |
+|---|---|---|
+| 1.1 | `engines/scope.py` | Scope overlap + directional target coverage |
+| 1.2 | `engines/dedup.py` | URL canonicalisation + five-component dedup hash |
+| 1.3 | `engines/scoring.py` | Tier weights, `tanh(\|raw\|/2)` strength, status, Evidence Confidence |
+| 1.4 | `engines/scoring.py` | Verdict gate with brute-forced unreachability proof |
+| 1.5 | `engines/conflict.py` | R1–R5, deterministic, no LLM |
+| 1.6 | `engines/economics/` | Four typed templates, `brentq` breakpoints, ±20% elasticity |
+| 1.7 | `engines/experiments.py`, `criterion.py` | Sensitivity → experiment, mechanical kill criteria |
+| 1.8 | `engines/diff.py` | Typed ledger diff + single-sentence causal chain |
+| 1.9 | `tests/engines/test_purity.py`, `docs/SCORING.md` | Import-boundary guard, published formulas |
+
+### Gate command and actual output
+
+```
+$ cd apps/api && uv run pytest -q
+229 passed in 3.47s
+```
+
+PRD §19.2's deterministic components, each required to score 100%:
+
+```
+scope_overlap        15 passed
+conflict_engine      30 passed
+economics_solver     29 passed
+kill_criterion       13 passed
+purity_boundary       3 passed
+```
+
+The verdict gate's unreachability claim is proven by brute force over **504** combinations (extended from 288 to vary the assumption list's *shape*, not only statuses), with an explicit count assertion so an empty loop cannot pass silently.
+
+The return-visit causal sentence renders as one line:
+
+> 3 new evidence items landed (3 from customer), pricing_wtp moved uncertain → refuted, which moved price_monthly from founder_asserted 499.0 to evidence_backed 249.0, which moved the break-even delivery cost from 38.0 to 19.0. Verdict changed PROCEED → PIVOT.
+
+### Defects found and fixed during review
+
+Nine real defects, every one in the plan's own reference code rather than in transcription. Recorded because the pattern matters: **the reference code was not correct, and the review loop is what caught it.**
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| 1 | `evidence_confidence` returned **40.0** for a totally empty record | Both `(1 − x)` penalty terms vacuously read "perfect" when there is nothing to contradict or leave open, handing 40% of the score to a record where nothing was investigated |
+| 2 | After that guard, a blocking assumption with zero evidence still scored **20.0** | Same flaw one level down. PRD §9.3 requires the four components always be displayed, so a founder would have seen "Contradiction: perfect" beside "Coverage: 0" — a green tick earned by checking nothing |
+| 3 | **NaN defeated the verdict gate** → `PROCEED` | `nan < 0.70` and `nan < 45` are both `False` under IEEE-754, so neither numeric condition fired |
+| 4 | An empty/blocking-free assumptions list → `PROCEED` | `all(... for a in [])` is vacuously `True` |
+| 5 | A refuted **high**-criticality assumption with no adjacency → `PROCEED` | Escaped STOP (blocking only) and PIVOT (needs adjacency); PRD §9.4's table is silent on this combination. Recorded as **D11** |
+| 6 | `contradiction`/`open_critical` asymmetry when no critical assumptions exist | One paid zero, the other paid full credit, and the comment claimed they matched |
+| 7 | R1, R3, R5 had **no test capable of failing** | Mutation-proved: swapping R5's directional check for symmetric overlap, flipping R3's `>` to `>=`, and dropping R1's tier filter from one side each left all 26 tests green |
+| 8 | The `brentq` bracket nudge was scaled to the **full range** | Reproduced reporting **499999.999 instead of 0.0009** — a *wrong-valued* threshold, the worst output this module can produce, since breakpoints are rendered to a founder as facts about their business |
+| 9 | `causal_sentence` silently dropped three of eight diff types | A diff of only `evidence_added` rendered as `"."` — a bare period |
+
+Two more caught by implementers and confirmed: `cac_buyer` silently lost its breakpoint when total CAC hit exactly zero and tripped the `+inf` sentinel; and four of seven experiment methods carried a placeholder `threshold=0.0`, making their kill criteria **unsatisfiable** (`<= 0.0` against a quote, a cost-per-signup, a churn rate) or **trivially satisfied** (`>= 0.0` against a basket value) — while still passing the P9 export gate as structurally valid. A gate that returns the same answer regardless of the result is worse than a missing one.
+
+### Deviations from `docs/PRD.md`
+
+| # | Deviation | Reason |
+|---|---|---|
+| D4 | R4 fires for `medium` criticality as well as `blocking`/`high`, while the gate uses only `{blocking, high}` | Reporting a medium-criticality silence is informative; verified it cannot reach the gate or the contradiction term, since R4 only fires on *zero* evidence and `investigated_critical` requires evidence |
+| D5 | No economics template for `ad_consumer` or `hardware`; they map to `saas_v1` / `d2c_v1` | PRD §16.5 specifies four templates. The substitution is stored in `model_runs.template_key` so it is visible, not silent |
+| D11 | `PROCEED` requires no refuted **critical** assumption, not merely all-blocking-supported | Fills a genuine gap in PRD §9.4's decision table. `STOP` stays reserved for blocking, so the fall-through yields `PIVOT` |
+| D12 | `generate_experiments` takes `modelled: dict[str, float] \| None`; experiments whose threshold cannot be filled are **skipped** | Beats emitting a criterion that cannot fail. Phase 5 always has the solved model, so nothing is lost in practice |
+
+### Known limitations, accepted
+
+- `_elasticity` divides by the nominal 20% even when clamping truncates the applied move at a parameter bound, understating elasticity there. Does not affect any shipped ranking — no parameter clamps at its default in any of the four templates — and the downstream consumer uses the ranking, not the magnitude. Documented at the call site.
+- The 504-case brute force uses only sub-threshold coverage/confidence, so the coverage gate fires first in every case; the empty-blocking and refuted-high paths are covered by dedicated tests rather than by the sweep.
+
+---
+
 
 ## Phase 2 — LLM layer, offline transport, tracing
 
