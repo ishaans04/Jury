@@ -124,54 +124,74 @@ def _balanced_objects(text: str) -> list[tuple[int, str]]:
     """Return (start_offset, span) for every top-level syntactically-balanced
     {...} span in text, in the order they appear.
 
-    A regex that matches from the first "{" to the very last "}" merges two
-    separate JSON objects into one invalid blob and mishandles an incidental
-    brace in surrounding prose. Retrying every '{' as an independent start
-    recovers each complete top-level object instead. String literals are
-    tracked so a literal brace inside a quoted value doesn't confuse the
-    depth count, and once a span balances, the scan resumes after it rather
-    than also matching the objects nested inside it. The start offset is
-    returned alongside each span so `_json_candidates` can merge these with
-    the candidates found inside fenced blocks and sort the combined set by
-    where each one actually sits in the original response.
+    Single pass, O(n): one depth counter and one start index are tracked as
+    the scan moves strictly forward, never backward. When a tracked span's
+    depth returns to zero it is recorded and the scan resumes right after it
+    looking for a fresh '{'; when the text ends while depth is still > 0,
+    that start is simply abandoned in place -- there is no rewind to retry
+    from the next character.
+
+    An earlier version retried every '{' as an independent starting point on
+    failure (reset to `start + 1` and rescan from there). On a real input of
+    20,000 unterminated '{' -- untrusted model output arriving on every call,
+    inside a repair loop that can run up to four times per claim across a
+    five-chair fan-out -- that degenerates to O(n^2): each failed start
+    rescans almost the entire remaining string, measured at ~26s. This pass
+    touches each character once.
+
+    The trade this makes: a '{' that never closes swallows the rest of the
+    string for the purposes of finding *further* candidates, because once
+    tracking starts from it the scan cannot abandon mid-string and restart
+    at a fresh position without reintroducing the O(n^2) behaviour above. If
+    a genuinely well-formed object appears later but the running depth from
+    that dangling '{' onward never returns to exactly zero before the string
+    ends, this pass will not surface it as an independent candidate, where
+    the slower retry-every-start version would have. That is judged an
+    acceptable trade: a single permanently-dangling brace with a real object
+    stranded behind it is a far rarer shape for this model class than the
+    self-balancing decorative decoys this module actually exists to see (a
+    fenced curly-brace example, a `{curly}` placeholder mention) -- both of
+    which close on their own and are handled exactly as before -- and
+    unbounded backtracking on adversarial or merely malformed output is the
+    concrete, measured risk.
+
+    String literals are tracked (reset fresh at the start of each candidate)
+    so a literal brace inside a quoted value doesn't confuse the count.
     """
     spans: list[tuple[int, str]] = []
     n = len(text)
     i = 0
+    start = -1
+    depth = 0
+    in_str = False
+    esc = False
     while i < n:
-        if text[i] != "{":
+        c = text[i]
+        if depth == 0:
+            if c == "{":
+                start = i
+                depth = 1
+                in_str = False
+                esc = False
             i += 1
             continue
-        depth = 0
-        in_str = False
-        esc = False
-        end = None
-        for j in range(i, n):
-            c = text[j]
-            if in_str:
-                if esc:
-                    esc = False
-                elif c == "\\":
-                    esc = True
-                elif c == '"':
-                    in_str = False
-            else:
-                if c == '"':
-                    in_str = True
-                elif c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = j
-                        break
-        if end is not None:
-            spans.append((i, text[i : end + 1]))
-            i = end + 1
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
         else:
-            # this '{' never closes; the next '{' (if any) might still be
-            # the start of a real, balanced object further along.
-            i += 1
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    spans.append((start, text[start : i + 1]))
+        i += 1
     return spans
 
 

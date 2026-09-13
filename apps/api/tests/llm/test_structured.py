@@ -1,3 +1,5 @@
+import time
+
 from pydantic import BaseModel, Field
 
 from jury.llm.structured import schema_prompt_block, structured, structured_many, structured_report
@@ -293,6 +295,21 @@ async def test_three_fenced_blocks_where_only_the_last_is_valid():
     rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
     assert rep.value == Tiny(name="a", count=2)
     assert rep.stages == ["initial"]
+
+
+# ── extra: the balanced-object scan must not be quadratic ──────────────────
+async def test_a_pathological_unterminated_brace_input_completes_quickly():
+    """A prior version retried every '{' as an independent start on
+    failure, rescanning almost the entire remaining string each time. On
+    20,000 unterminated '{' with no closing brace anywhere, that measured
+    at roughly 26-39 seconds. The single-pass scan must not reproduce that."""
+    pathological = "{" * 20_000
+    client = Scripted(pathological, "{}", "x", "y")
+    started = time.perf_counter()
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 1.0, f"took {elapsed:.2f}s -- the scan is not single-pass"
+    assert rep.value is None, "nothing in this input could ever validate"
 
 
 # ── structured() and structured_many() convenience wrappers ────────────────
