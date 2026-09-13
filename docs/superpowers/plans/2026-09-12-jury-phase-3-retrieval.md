@@ -55,11 +55,26 @@ from jury.retrieval.ssrf import BlockedURL, assert_fetch_allowed, is_fetch_allow
     "http://192.168.1.1/", "http://169.254.169.254/latest/meta-data/",
     "http://metadata.google.internal/computeMetadata/v1/",
     "http://100.64.0.1/",
+    # Trailing dot: resolvers treat these as identical to the undotted form.
+    "http://localhost./admin", "http://metadata./x",
+    "http://metadata.google.internal./x", "http://instance-data./x",
+    "http://169.254.169.254./latest/meta-data/", "http://127.0.0.1./",
+    # inet_aton-style encodings that curl and glibc resolve to loopback.
+    "http://2130706433/", "http://0x7f000001/", "http://0177.0.0.1/",
+    "http://127.1/", "http://0x7f.0.0.1/", "http://[::ffff:127.0.0.1]/",
 ])
 def test_private_and_metadata_targets_are_blocked(url):
     """Model-selected URLs must never reach infrastructure."""
     allowed, _ = is_fetch_allowed(url)
     assert allowed is False
+
+
+def test_every_blocked_hostname_is_still_blocked_with_a_trailing_dot():
+    """Canonicalisation, not enumeration. A future addition to BLOCKED_HOSTNAMES
+    inherits this protection automatically instead of needing its own test."""
+    from jury.retrieval.ssrf import BLOCKED_HOSTNAMES
+    for host in BLOCKED_HOSTNAMES:
+        assert is_fetch_allowed(f"http://{host}./")[0] is False, host
 
 
 @pytest.mark.parametrize("url", [
@@ -160,7 +175,12 @@ def is_fetch_allowed(url: str) -> tuple[bool, str]:
     if parts.username or parts.password:
         return False, "credentials in url"
 
-    host = (parts.hostname or "").lower()
+    # Canonicalise BEFORE any check. A trailing dot marks a DNS name as already
+    # fully-qualified, and resolvers treat "localhost." as "localhost" — so an
+    # exact-string blocklist without this strip is bypassed by one character,
+    # including on 169.254.169.254. (the cloud metadata endpoint). Enumerating
+    # bad inputs is not a substitute for canonicalising them.
+    host = (parts.hostname or "").lower().rstrip(".")
     if not host:
         return False, "missing host"
     if host in BLOCKED_HOSTNAMES:
