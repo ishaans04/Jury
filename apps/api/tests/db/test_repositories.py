@@ -84,12 +84,15 @@ async def _seed_project_chain(pool) -> dict:
 # ── P6: EvidenceRepo has no mutation surface ────────────────────────────
 
 def test_evidence_repo_exposes_no_mutation_methods():
-    """P6: corrections supersede. A repo method that updates evidence would
-    be a bug the database would then reject at runtime -- better to not
-    have it at all."""
-    names = [n for n in dir(EvidenceRepo) if not n.startswith("_")]
-    for banned in ("update", "delete", "upsert", "save", "set_confidence"):
-        assert not any(banned in n for n in names), names
+    """P6: corrections supersede, never update. The capability must be ABSENT
+    from the API, not merely unused -- so this asserts the exact public
+    surface rather than denylisting verbs someone happened to think of. A
+    denylist of ("update", "delete", "upsert", "save", "set_confidence")
+    misses `set_status`, `mark_superseded`, `revise`, or any other verb not
+    already on the list; an allowlist of the whole surface cannot be
+    defeated by picking a different name."""
+    public = {n for n in dir(EvidenceRepo) if not n.startswith("_")}
+    assert public == {"insert_verified", "list_for_project"}, public
 
 
 # ── EvidenceRepo.insert_verified ────────────────────────────────────────
