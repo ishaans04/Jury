@@ -1825,15 +1825,35 @@ def test_no_breakpoint_reported_when_none_exists_in_range():
     """A parameter that cannot flip the sign anywhere in its plausible range
     must not be given a fabricated threshold.
 
-    fixed_monthly and the CAC parameters do not appear in the contribution
-    margin at all, so no value of them crosses zero. They must be ABSENT from
-    breakpoints, not present with an invented number.
+    fixed_monthly appears in neither contribution margin, LTV, nor CAC, so no
+    value of it crosses anything. It must be ABSENT from breakpoints, not
+    present with an invented number.
+
+    NOTE: the CAC parameters are NOT in this category. They are absent from
+    contribution margin but reachable through the LTV/CAC fallback objective,
+    and their roots are real decision points rather than artefacts.
     """
     r = solve("marketplace_v1", MARKETPLACE)
     reported = {b.variable for b in r.breakpoints}
     assert "fixed_monthly" not in reported
-    assert "cac_supplier" not in reported
     assert "delivery_cost" in reported          # this one genuinely has a root
+
+
+def test_cac_breakpoints_are_reported_via_the_ltv_cac_objective():
+    """CAC parameters never appear in contribution margin, so they are only
+    reachable through the LTV/CAC fallback -- and they are among the most
+    decision-relevant outputs the model produces ("you cannot pay more than X
+    to acquire a buyer"). Losing them would gut the result, so pin them.
+
+    LTV is 800 here, so ltv_cac crosses 1 at total CAC 800:
+        cac_supplier -> 800 - 400 = 400
+        cac_buyer    -> 800 - 0   = 800
+    """
+    r = solve("marketplace_v1", MARKETPLACE)
+    bp = {b.variable: b for b in r.breakpoints}
+    assert bp["cac_supplier"].threshold == pytest.approx(400.0, abs=1e-6)
+    assert bp["cac_buyer"].threshold == pytest.approx(800.0, abs=1e-6)
+    assert bp["cac_supplier"].direction == "above"
 
 
 def test_breakpoints_are_never_nan_or_infinite():
