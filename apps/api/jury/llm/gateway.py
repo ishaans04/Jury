@@ -46,9 +46,27 @@ class LiveLLMClient:
                  max_calls: int = MAX_LLM_CALLS_PER_RUN) -> None:
         self._settings = settings
         self._max_calls = max_calls
+        self._budget_lock = asyncio.Lock()
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+
+    async def _reserve_budget(self) -> None:
+        """Check-and-increment under a lock so concurrent callers (Phase 4
+        fans five investigator chairs out against a shared gateway) cannot
+        both observe room under the cap and both proceed — the slot is
+        reserved before any network call starts, closing the TOCTOU window."""
+        async with self._budget_lock:
+            if self.calls >= self._max_calls:
+                raise BudgetExceeded(
+                    f"run exhausted its {self._max_calls}-call LLM budget")
+            self.calls += 1
+
+    async def _release_budget(self) -> None:
+        """Give the slot back when the reserved call ultimately fails, so a
+        chain that exhausts every tier still consumes zero net budget."""
+        async with self._budget_lock:
+            self.calls -= 1
 
     async def _call_once(self, *, model_id: str, messages: list[dict],
                          json_mode: bool, temperature: float):
@@ -92,18 +110,27 @@ class LiveLLMClient:
         before finally giving up. A fatal error never sleeps, on any tier.
         Exhausting the chain always raises — it never invents an answer.
 
-        The budget counter is incremented once per successful `complete()`
-        call, not once per underlying HTTP attempt: retries and tier
-        fallbacks are implementation detail of fulfilling one logical call, so
-        they must not consume the budget more than once. A call that
-        ultimately fails (raises) consumes none of the budget either — the
+        The budget slot is reserved once per `complete()` call, before any
+        network attempt starts, and held for the lifetime of that call — not
+        once per underlying HTTP attempt: retries and tier fallbacks are
+        implementation detail of fulfilling one logical call, so they must
+        not consume the budget more than once. A call that ultimately fails
+        (raises) releases its slot and so consumes none of the budget — the
         cap exists to bound how many *answers* a run may draw on, not to
-        penalise transient provider flakiness.
+        penalise transient provider flakiness. Reserving up front (rather
+        than incrementing on success) is what keeps a burst of concurrent
+        callers from overrunning the cap: see `_reserve_budget`.
         """
-        if self.calls >= self._max_calls:
-            raise BudgetExceeded(
-                f"run exhausted its {self._max_calls}-call LLM budget")
+        await self._reserve_budget()
+        try:
+            return await self._walk_chain(model=model, messages=messages,
+                                          json_mode=json_mode, temperature=temperature)
+        except Exception:
+            await self._release_budget()
+            raise
 
+    async def _walk_chain(self, *, model: str, messages: list[dict],
+                          json_mode: bool, temperature: float) -> LLMResponse:
         role: ModelRole = model if model in FALLBACK_CHAIN else "fast"
         chain = FALLBACK_CHAIN[role]
         last: Exception | None = None
@@ -128,7 +155,6 @@ class LiveLLMClient:
                         await asyncio.sleep(delay)
                         continue
 
-                    self.calls += 1
                     return self._to_response(raw, model_id)
                 continue  # exhausted the last tier; falls through to raise
 
@@ -148,11 +174,9 @@ class LiveLLMClient:
                     except Exception as err2:                # noqa: BLE001
                         last = err2
                         continue  # still failing after one retry: advance
-                    self.calls += 1
                     return self._to_response(raw, model_id)
                 continue  # quota or fatal: advance immediately, no sleep
 
-            self.calls += 1
             return self._to_response(raw, model_id)
 
         raise RuntimeError(f"all models in chain for role '{role}' failed") from last

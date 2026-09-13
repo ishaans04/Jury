@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from jury.llm.gateway import BudgetExceeded, LiveLLMClient
@@ -163,3 +165,26 @@ async def test_fatal_error_advances_without_sleeping(monkeypatch):
     assert r.text == "ok"
     assert len(calls) == 2 and calls[0] != calls[1]   # advanced to the next tier
     assert sleeps == []                                # fatal never sleeps
+
+
+async def test_concurrent_calls_never_exceed_the_budget(monkeypatch):
+    """PRD §17.2 + Phase 4: five investigator chairs will share one gateway.
+    A check-then-increment race would let concurrency width push the run past
+    its cap; the reserve-before-call lock must prevent that."""
+    async def slow_ok(**kw):
+        await asyncio.sleep(0.02)   # widen the race window
+        return {"choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+    monkeypatch.setattr("jury.llm.gateway.acompletion", slow_ok)
+    client = LiveLLMClient(Settings(_env_file=None, GROQ_API_KEY="sk-x"), max_calls=3)
+
+    async def attempt() -> bool:
+        try:
+            await client.complete(model="fast", messages=[{"role": "user", "content": "x"}])
+            return True
+        except BudgetExceeded:
+            return False
+
+    results = await asyncio.gather(*(attempt() for _ in range(10)))
+    assert sum(results) == 3
+    assert client.calls == 3
