@@ -92,3 +92,74 @@ async def test_temperature_defaults_to_zero_for_reproducibility(monkeypatch):
     client = LiveLLMClient(Settings(_env_file=None, GROQ_API_KEY="sk-x"))
     await client.complete(model="fast", messages=[{"role": "user", "content": "x"}])
     assert seen["temperature"] == 0.0
+
+
+async def test_transient_error_retries_the_same_model_once_before_advancing(monkeypatch):
+    """A bare timeout/5xx carries no quota signal — a single ordinary network
+    blip must not permanently downgrade the run's highest-value calls."""
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    async def fake_acompletion(*, model, messages, **kw):
+        calls.append(model)
+        if len(calls) == 1:
+            raise RuntimeError("Connection timed out")
+        return {"choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("jury.llm.gateway.acompletion", fake_acompletion)
+    monkeypatch.setattr("jury.llm.gateway.asyncio.sleep", fake_sleep)
+    client = LiveLLMClient(Settings(_env_file=None, GROQ_API_KEY="sk-x"))
+    r = await client.complete(model="reasoning", messages=[{"role": "user", "content": "x"}])
+    assert r.text == "ok"
+    assert len(calls) == 2 and calls[0] == calls[1]   # same model, retried in place
+    assert len(sleeps) == 1                            # exactly one short backoff
+
+
+async def test_quota_error_advances_immediately_with_no_sleep(monkeypatch):
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    async def fake_acompletion(*, model, messages, **kw):
+        calls.append(model)
+        if len(calls) == 1:
+            raise RuntimeError("429 rate_limit_exceeded")
+        return {"choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("jury.llm.gateway.acompletion", fake_acompletion)
+    monkeypatch.setattr("jury.llm.gateway.asyncio.sleep", fake_sleep)
+    client = LiveLLMClient(Settings(_env_file=None, GROQ_API_KEY="sk-x"))
+    r = await client.complete(model="reasoning", messages=[{"role": "user", "content": "x"}])
+    assert r.text == "ok"
+    assert len(calls) == 2 and calls[0] != calls[1]   # advanced to the next tier
+    assert sleeps == []                                # no sleep at all
+
+
+async def test_fatal_error_advances_without_sleeping(monkeypatch):
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    async def fake_acompletion(*, model, messages, **kw):
+        calls.append(model)
+        if len(calls) == 1:
+            raise RuntimeError("invalid_request: malformed body")
+        return {"choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("jury.llm.gateway.acompletion", fake_acompletion)
+    monkeypatch.setattr("jury.llm.gateway.asyncio.sleep", fake_sleep)
+    client = LiveLLMClient(Settings(_env_file=None, GROQ_API_KEY="sk-x"))
+    r = await client.complete(model="reasoning", messages=[{"role": "user", "content": "x"}])
+    assert r.text == "ok"
+    assert len(calls) == 2 and calls[0] != calls[1]   # advanced to the next tier
+    assert sleeps == []                                # fatal never sleeps
