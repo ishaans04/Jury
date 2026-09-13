@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from jury.llm.structured import schema_prompt_block, structured_many, structured_report
+from jury.llm.structured import schema_prompt_block, structured, structured_many, structured_report
 from jury.schemas.enums import Direction
 from jury.schemas.scope import Scope
 from jury.transport.protocols import LLMResponse
@@ -184,21 +184,64 @@ async def test_field_split_asks_for_enum_values_and_nested_fields_not_a_bare_any
         direction=Direction.SUPPORTS, scope=Scope(geo="IN", segment="smb"))
 
 
-# ── extra: _extract_json must not merge two distinct JSON objects ──────────
-async def test_a_response_with_two_json_objects_yields_only_the_first():
-    """A greedy 'first { to last }' match would splice both objects into one
-    invalid blob. The first complete, balanced object should be recovered on
-    its own instead."""
+# ── extra: multi-candidate extraction must not silently pick the wrong one ──
+#
+# The schema is embedded in EVERY prompt (mitigation 2), so a small model
+# echoing a schema-shaped example before its real answer is a likely failure
+# mode for this model class, not an exotic one. A extractor that returns the
+# first balanced {...} span without checking it validates can silently hand
+# the caller that decorative example, reported as a clean, unescalated
+# success -- which is worse than either a repair or a drop, since nothing
+# downstream has any signal that the data is wrong.
+async def test_a_response_with_two_valid_json_objects_prefers_the_later_one():
+    """Revises this module's own earlier test (from the first review round):
+    when multiple balanced candidates all validate, the later one wins, not
+    the first -- see test_example_then_real_json_returns_the_real_answer_
+    not_the_example below for why 'first that validates' is unsafe."""
     client = Scripted('Here: {"name":"a","count":1} and also {"name":"b","count":2}')
     rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="b", count=2)
+    assert rep.stages == ["initial"]
+
+
+async def test_example_then_real_json_returns_the_real_answer_not_the_example():
+    """Both objects are schema-valid, so 'first candidate that validates'
+    would return the example -- exactly the bug this test exists to catch."""
+    client = Scripted(
+        'For example your answer should look like {"name":"example","count":0}\n'
+        'Here is the actual record: {"name":"a","count":2}')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a", count=2)
+    assert rep.stages == ["initial"]
+
+
+async def test_non_json_braces_before_the_real_json_do_not_force_escalation():
+    client = Scripted('note: use {curly} placeholder then the real one {"name":"a","count":1}')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
     assert rep.value == Tiny(name="a", count=1)
+    assert rep.stages == ["initial"]
+
+
+async def test_fenced_json_followed_by_trailing_chatter_is_still_extracted():
+    client = Scripted('```json\n{"name":"a","count":2}\n```\nHope that helps!')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a", count=2)
+    assert rep.stages == ["initial"]
+
+
+async def test_braces_inside_a_string_value_are_not_treated_as_boundaries():
+    """Regression coverage for behaviour the balanced-brace scanner already
+    had: a literal '{'/'}' inside a quoted string must not be mistaken for
+    the start or end of a JSON object."""
+    client = Scripted('{"name":"a{b}c","count":1}')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a{b}c", count=1)
     assert rep.stages == ["initial"]
 
 
 # ── structured() and structured_many() convenience wrappers ────────────────
 async def test_structured_returns_just_the_value():
     client = Scripted('{"name":"a","count":2}')
-    from jury.llm.structured import structured
     value = await structured(client, role="fast", prompt="go", schema=Tiny)
     assert value == Tiny(name="a", count=2)
 

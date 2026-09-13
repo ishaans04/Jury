@@ -118,25 +118,36 @@ def schema_prompt_block(schema: type[BaseModel]) -> str:
 # ── recovering JSON from a chatty small model ───────────────────────────────
 
 
-def _first_balanced_object(text: str) -> str | None:
-    """Return the first syntactically-balanced {...} span in text.
+def _balanced_objects(text: str) -> list[str]:
+    """Return every top-level syntactically-balanced {...} span in text, in
+    the order they appear.
 
     A regex that matches from the first "{" to the very last "}" merges two
-    separate JSON objects in the same response into one invalid blob, and
-    mishandles an incidental brace in surrounding prose. Scanning for the
-    first span whose braces actually balance (respecting string literals so a
-    literal brace inside a quoted value doesn't confuse the count) recovers
-    just the first complete object instead.
+    separate JSON objects in the same response into one invalid blob,
+    mishandles an incidental brace in surrounding prose, and -- worse than
+    either -- if the response is "here's an example: {...} here's the real
+    answer: {...}", a scan that stops at the *first* balanced span can hand
+    the caller the example, schema-valid and reported as a clean success.
+    This collects every candidate instead of guessing which one matters;
+    `_parse` is what decides between them, because only schema validation
+    can. String literals are tracked so a literal brace inside a quoted
+    value doesn't confuse the depth count, and once a span balances, the
+    scan resumes after it rather than also matching the objects nested
+    inside it.
     """
+    spans: list[str] = []
     n = len(text)
-    for start in range(n):
-        if text[start] != "{":
+    i = 0
+    while i < n:
+        if text[i] != "{":
+            i += 1
             continue
         depth = 0
         in_str = False
         esc = False
-        for i in range(start, n):
-            c = text[i]
+        end = None
+        for j in range(i, n):
+            c = text[j]
             if in_str:
                 if esc:
                     esc = False
@@ -152,25 +163,62 @@ def _first_balanced_object(text: str) -> str | None:
                 elif c == "}":
                     depth -= 1
                     if depth == 0:
-                        return text[start : i + 1]
-        # this '{' never closes; the next '{' (if any) might still be the
-        # start of a real, balanced object further along.
-    return None
+                        end = j
+                        break
+        if end is not None:
+            spans.append(text[i : end + 1])
+            i = end + 1
+        else:
+            # this '{' never closes; the next '{' (if any) might still be
+            # the start of a real, balanced object further along.
+            i += 1
+    return spans
+
+
+def _json_candidates(text: str) -> list[str]:
+    """All plausible JSON-object candidates in a response, in the order they
+    appear. Falls back to the raw (fence-stripped) text when no balanced
+    object is found at all, which keeps today's behaviour for a scalar or
+    genuinely unparseable answer."""
+    fenced = _FENCE.search(text)
+    scan = fenced.group(1) if fenced else text
+    spans = _balanced_objects(scan)
+    return spans if spans else [scan.strip()]
 
 
 def _extract_json(text: str) -> str:
-    """Small models wrap JSON in fences and chatter. Recover the object."""
-    fenced = _FENCE.search(text)
-    scan = fenced.group(1) if fenced else text
-    obj = _first_balanced_object(scan)
-    return obj if obj is not None else scan.strip()
+    """Best-effort single JSON snippet for the field-split scalar coercion
+    (`_coerce_scalar`), which only ever expects one answer per call. Prefers
+    the *last* candidate for the same reason `_parse` does below: the schema
+    is embedded in every prompt, so an earlier candidate is more likely to
+    be an echoed example than the model's actual answer."""
+    return _json_candidates(text)[-1]
 
 
 def _parse(text: str, schema: type[BaseModel]) -> tuple[BaseModel | None, str | None]:
-    try:
-        return schema.model_validate_json(_extract_json(text)), None
-    except (ValidationError, ValueError) as err:
-        return None, str(err)
+    """Validate every candidate object in `text`, preferring the *last* one
+    that validates.
+
+    Taking the first candidate that validates is not safe: the schema is
+    embedded in every prompt (mitigation 2), so a model that echoes a
+    schema-shaped example before its real answer produces an earlier
+    candidate that is often schema-valid too (it's shaped by the same
+    schema) while being the wrong data. Walking from the end picks the
+    model's actual answer over its own worked example in the common case,
+    where the real answer follows any preamble. If nothing validates, the
+    error reported is the *last* candidate's -- it is far more likely to be
+    the model's real (failed) attempt than a preamble example, so the repair
+    prompt shows the model what it actually got wrong.
+    """
+    candidates = _json_candidates(text)
+    last_candidate_error: str | None = None
+    for candidate in reversed(candidates):
+        try:
+            return schema.model_validate_json(candidate), None
+        except (ValidationError, ValueError) as err:
+            if last_candidate_error is None:
+                last_candidate_error = str(err)
+    return None, last_candidate_error
 
 
 def _coerce_scalar(text: str) -> object:
