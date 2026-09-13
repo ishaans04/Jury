@@ -120,24 +120,22 @@ def schema_prompt_block(schema: type[BaseModel]) -> str:
 # ── recovering JSON from a chatty small model ───────────────────────────────
 
 
-def _balanced_objects(text: str) -> list[str]:
-    """Return every top-level syntactically-balanced {...} span in text, in
-    the order they appear.
+def _balanced_objects(text: str) -> list[tuple[int, str]]:
+    """Return (start_offset, span) for every top-level syntactically-balanced
+    {...} span in text, in the order they appear.
 
     A regex that matches from the first "{" to the very last "}" merges two
-    separate JSON objects in the same response into one invalid blob,
-    mishandles an incidental brace in surrounding prose, and -- worse than
-    either -- if the response is "here's an example: {...} here's the real
-    answer: {...}", a scan that stops at the *first* balanced span can hand
-    the caller the example, schema-valid and reported as a clean success.
-    This collects every candidate instead of guessing which one matters;
-    `_parse` is what decides between them, because only schema validation
-    can. String literals are tracked so a literal brace inside a quoted
-    value doesn't confuse the depth count, and once a span balances, the
-    scan resumes after it rather than also matching the objects nested
-    inside it.
+    separate JSON objects into one invalid blob and mishandles an incidental
+    brace in surrounding prose. Retrying every '{' as an independent start
+    recovers each complete top-level object instead. String literals are
+    tracked so a literal brace inside a quoted value doesn't confuse the
+    depth count, and once a span balances, the scan resumes after it rather
+    than also matching the objects nested inside it. The start offset is
+    returned alongside each span so `_json_candidates` can merge these with
+    the candidates found inside fenced blocks and sort the combined set by
+    where each one actually sits in the original response.
     """
-    spans: list[str] = []
+    spans: list[tuple[int, str]] = []
     n = len(text)
     i = 0
     while i < n:
@@ -168,7 +166,7 @@ def _balanced_objects(text: str) -> list[str]:
                         end = j
                         break
         if end is not None:
-            spans.append(text[i : end + 1])
+            spans.append((i, text[i : end + 1]))
             i = end + 1
         else:
             # this '{' never closes; the next '{' (if any) might still be
@@ -178,14 +176,59 @@ def _balanced_objects(text: str) -> list[str]:
 
 
 def _json_candidates(text: str) -> list[str]:
-    """All plausible JSON-object candidates in a response, in the order they
-    appear. Falls back to the raw (fence-stripped) text when no balanced
-    object is found at all, which keeps today's behaviour for a scalar or
-    genuinely unparseable answer."""
-    fenced = _FENCE.search(text)
-    scan = fenced.group(1) if fenced else text
-    spans = _balanced_objects(scan)
-    return spans if spans else [scan.strip()]
+    """Every plausible JSON-object candidate anywhere in the response --
+    inside every fenced block AND in the loose text around them -- in the
+    order they appear in the original response.
+
+    A model that has been shown the schema (mitigation 2 puts it in every
+    prompt) will often fence its illustrative example, since fencing is
+    exactly what a schema-aware assistant tends to do with a "for example"
+    JSON blob. An earlier version special-cased fencing: `_FENCE.search`
+    (first match only) and, whenever any fence existed, scanned *only*
+    inside it, discarding every loose candidate outside. That reintroduced
+    Finding 1's exact bug through a path last-preference never touched --
+    fenced-vs-fenced and fenced-vs-loose ordering was never considered at
+    all, so a fenced EXAMPLE still beat a later, correct real answer purely
+    because it was fenced and checked first, regardless of which one
+    actually came last in the response. Fencing is no longer given priority
+    over position: every fenced block's content is scanned for balanced
+    objects, every span of loose text outside any fence is scanned the same
+    way, and all candidates are merged and sorted by their position in the
+    original text before `_parse` applies last-preference across the whole
+    set -- a fence signals "this might be JSON", not "this is the final
+    answer".
+
+    Falls back to the last fence's content (if any fence exists) or the raw
+    text when no balanced object is found anywhere, which keeps today's
+    behaviour for a scalar or genuinely unparseable answer.
+    """
+    fence_matches = list(_FENCE.finditer(text))
+    candidates: list[tuple[int, str]] = []
+
+    for m in fence_matches:
+        inner_start = m.start(1)
+        for start_off, span in _balanced_objects(m.group(1)):
+            candidates.append((inner_start + start_off, span))
+
+    if fence_matches:
+        masked = list(text)
+        for m in fence_matches:
+            for k in range(m.start(), m.end()):
+                masked[k] = " "
+        loose_text = "".join(masked)
+    else:
+        loose_text = text
+
+    for start_off, span in _balanced_objects(loose_text):
+        candidates.append((start_off, span))
+
+    candidates.sort(key=lambda item: item[0])
+    if candidates:
+        return [span for _, span in candidates]
+
+    if fence_matches:
+        return [fence_matches[-1].group(1).strip()]
+    return [text.strip()]
 
 
 def _extract_json(text: str) -> str:
@@ -211,6 +254,22 @@ def _parse(text: str, schema: type[BaseModel]) -> tuple[BaseModel | None, str | 
     error reported is the *last* candidate's -- it is far more likely to be
     the model's real (failed) attempt than a preamble example, so the repair
     prompt shows the model what it actually got wrong.
+
+    This is a heuristic on source position, not a guarantee, and it has a
+    known failure mode: given
+    'Here is my answer {"name":"a","count":2} -- for instance another one
+    would be {"name":"decoy","count":9}', both candidates validate and this
+    picks the decoy, because it comes last. That trade is taken deliberately
+    -- for this model class, a chatty *preamble* before the real answer
+    (an echoed schema example, a worked-through explanation) is far more
+    common than a chatty *postamble* that itself contains a second,
+    independently valid JSON object, so preferring the last valid candidate
+    wins on expected value even though it is not sound in general. If a
+    later phase observes wrong-object selection in real traces, the fix is
+    to stop deciding by position and instead score each valid candidate by
+    how much of the prompt's own context it accounts for -- e.g. required-
+    field coverage, or overlap with values mentioned earlier in the prompt --
+    rather than by where in the response it happens to sit.
     """
     candidates = _json_candidates(text)
     last_candidate_error: str | None = None

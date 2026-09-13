@@ -240,6 +240,61 @@ async def test_braces_inside_a_string_value_are_not_treated_as_boundaries():
     assert rep.stages == ["initial"]
 
 
+# ── extra: fencing must not outrank position ────────────────────────────────
+#
+# A prior fix (`_json_candidates`'s first version) applied last-preference
+# only among candidates found *within a single fence*, because it used
+# `_FENCE.search` (first match only) and, whenever any fence existed, scanned
+# exclusively inside it -- silently discarding every loose candidate outside.
+# That reintroduces Finding 1's exact bug (a decorative example returned as a
+# clean, unescalated success) through a path the position-based fix never
+# touched. These pin down that fenced and loose candidates are now merged
+# into one ordered-by-position list before last-preference is applied.
+async def test_two_fenced_blocks_prefers_the_later_valid_one():
+    """Reproduced failure: example fenced, then the real answer also
+    fenced. The old code's `_FENCE.search` only ever saw the first fence."""
+    client = Scripted(
+        '```json\n{"name":"example","count":0}\n```\n'
+        'Here: ```json\n{"name":"a","count":2}\n```')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a", count=2)
+    assert rep.stages == ["initial"]
+
+
+async def test_fenced_example_then_loose_real_prefers_the_loose_real_one():
+    """Reproduced failure: the example is fenced, the real answer is loose
+    text outside the fence. The old code discarded every loose candidate
+    the moment any fence existed."""
+    client = Scripted(
+        '```json\n{"name":"example","count":0}\n```\n'
+        'Here is the actual record: {"name":"a","count":2}')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a", count=2)
+    assert rep.stages == ["initial"]
+
+
+async def test_loose_example_then_fenced_real_prefers_the_fenced_real_one():
+    """The reverse ordering: a loose example first, then the real answer
+    fenced. Confirms the merge is genuinely position-based, not biased
+    toward fenced or toward loose regardless of which comes last."""
+    client = Scripted(
+        'For example: {"name":"example","count":0}\n'
+        'Here: ```json\n{"name":"a","count":2}\n```')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a", count=2)
+    assert rep.stages == ["initial"]
+
+
+async def test_three_fenced_blocks_where_only_the_last_is_valid():
+    client = Scripted(
+        '```json\n{"bad":1}\n```\n'
+        '```json\n{"still":"bad"}\n```\n'
+        '```json\n{"name":"a","count":2}\n```')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny)
+    assert rep.value == Tiny(name="a", count=2)
+    assert rep.stages == ["initial"]
+
+
 # ── structured() and structured_many() convenience wrappers ────────────────
 async def test_structured_returns_just_the_value():
     client = Scripted('{"name":"a","count":2}')
