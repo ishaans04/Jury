@@ -9,12 +9,14 @@ Escalation, in order and never skipped:
 """
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
-from jury.transport.protocols import LLMClient
+from jury.tracing.events import TraceSink
+from jury.transport.protocols import LLMClient, LLMResponse
 
 RepairStage = Literal["initial", "repair", "field_split", "dropped"]
 
@@ -238,16 +240,40 @@ def _coerce_scalar(text: str) -> object:
 
 async def structured_report(
     client: LLMClient, *, role: str, prompt: str, schema: type[BaseModel],
+    trace: TraceSink | None = None,
 ) -> RepairReport:
-    """Produce a validated instance of `schema`, or None having tried everything."""
+    """Produce a validated instance of `schema`, or None having tried everything.
+
+    When `trace` is given, one `llm_call` row is emitted per attempt (stage
+    name, model role, token counts, latency) and, if the claim is ultimately
+    dropped, a final `error` row carrying every accumulated reason -- without
+    this, a dropped claim shows up in run_events as a node that ran and
+    produced nothing, with no way to see which stage failed or why (PRD
+    §11.2 dec. 9). `trace` is None by default and every call site below is a
+    no-op in that case, so omitting it behaves exactly as before.
+    """
     report = RepairReport(value=None)
     block = schema_prompt_block(schema)
 
+    async def _call(stage: RepairStage, content: str, *, json_mode: bool,
+                    field_name: str | None = None) -> LLMResponse:
+        started = time.perf_counter()
+        response = await client.complete(
+            model=role, messages=[{"role": "user", "content": content}],
+            json_mode=json_mode)
+        if trace is not None:
+            detail = {"stage": stage, "role": role, "model": response.model,
+                      "prompt_tokens": response.prompt_tokens,
+                      "completion_tokens": response.completion_tokens}
+            if field_name is not None:
+                detail["field"] = field_name
+            await trace.emit(node="structured", event="llm_call", detail=detail,
+                             latency_ms=int((time.perf_counter() - started) * 1000))
+        return response
+
     # ── stage 1: initial, JSON mode on, schema embedded ─────────────────────
     report.stages.append("initial")
-    first = await client.complete(
-        model=role, messages=[{"role": "user", "content": f"{prompt}\n\n{block}"}],
-        json_mode=True)
+    first = await _call("initial", f"{prompt}\n\n{block}", json_mode=True)
     value, error = _parse(first.text, schema)
     if value is not None:
         report.value = value
@@ -262,9 +288,7 @@ async def structured_report(
         f"Previous answer:\n{first.text}\n\n"
         f"Validation error:\n{error}\n\n"
         f"Return corrected JSON only.")
-    second = await client.complete(
-        model=role, messages=[{"role": "user", "content": repair_prompt}],
-        json_mode=True)
+    second = await _call("repair", repair_prompt, json_mode=True)
     value, error2 = _parse(second.text, schema)
     if value is not None:
         report.value = value
@@ -295,9 +319,7 @@ async def structured_report(
         ask = (f"{prompt}\n\n"
                f'Answer with ONLY the value for the single field "{name}" '
                f"({hint}). No other keys. No prose -- just the value.")
-        one = await client.complete(model=role,
-                                    messages=[{"role": "user", "content": ask}],
-                                    json_mode=False)
+        one = await _call("field_split", ask, json_mode=False, field_name=name)
         assembled[name] = _coerce_scalar(one.text)
 
     try:
@@ -310,14 +332,18 @@ async def structured_report(
     # A dropped claim is acceptable; a malformed ledger row is not (PRD §15.3).
     report.stages.append("dropped")
     report.value = None
+    if trace is not None:
+        await trace.emit(node="structured", event="error",
+                         detail={"reasons": list(report.errors)})
     return report
 
 
 async def structured(client: LLMClient, *, role: str, prompt: str,
-                     schema: type[BaseModel]) -> BaseModel | None:
+                     schema: type[BaseModel],
+                     trace: TraceSink | None = None) -> BaseModel | None:
     """Convenience wrapper when the caller does not need the escalation trace."""
     return (await structured_report(client, role=role, prompt=prompt,
-                                    schema=schema)).value
+                                    schema=schema, trace=trace)).value
 
 
 async def structured_many(client: LLMClient, *, role: str, prompts: list[str],

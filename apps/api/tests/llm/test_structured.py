@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from jury.llm.structured import schema_prompt_block, structured, structured_many, structured_report
 from jury.schemas.enums import Direction
 from jury.schemas.scope import Scope
+from jury.tracing.events import MemoryTraceSink
 from jury.transport.protocols import LLMResponse
 
 
@@ -255,3 +256,54 @@ async def test_structured_many_drops_failures_and_keeps_successes():
     values = await structured_many(client, role="fast",
                                    prompts=["p1", "p2", "p3"], schema=Tiny)
     assert values == [Tiny(name="a", count=1), Tiny(name="c", count=3)]
+
+
+# ── trace: a dropped claim's stage-by-stage history must reach run_events ──
+#
+# Only the outer `@traced` node emits node_start/node_end/error -- without
+# wiring here, a dropped claim shows up in the trace as a node that ran and
+# produced nothing, with no way to see which stage failed or why. `trace` is
+# optional and defaults to None; every test above this section passes no
+# trace at all, so they also double as proof the default path is unchanged.
+async def test_a_successful_first_attempt_emits_exactly_one_llm_call_row():
+    sink = MemoryTraceSink()
+    client = Scripted('{"name":"a","count":2}')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny, trace=sink)
+    assert rep.value == Tiny(name="a", count=2)
+    assert [r["event"] for r in sink.rows] == ["llm_call"]
+    assert sink.rows[0]["detail"]["stage"] == "initial"
+    assert sink.rows[0]["detail"]["role"] == "fast"
+    assert sink.rows[0]["detail"]["prompt_tokens"] == 1
+    assert sink.rows[0]["detail"]["completion_tokens"] == 1
+    assert sink.rows[0]["latency_ms"] >= 0
+
+
+async def test_a_repair_emits_two_llm_call_rows():
+    sink = MemoryTraceSink()
+    client = Scripted('{"name":"a","count":-1}', '{"name":"a","count":1}')
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny, trace=sink)
+    assert rep.value == Tiny(name="a", count=1)
+    assert [r["event"] for r in sink.rows] == ["llm_call", "llm_call"]
+    assert [r["detail"]["stage"] for r in sink.rows] == ["initial", "repair"]
+
+
+async def test_a_dropped_claim_emits_a_row_per_attempt_plus_a_final_error_row():
+    sink = MemoryTraceSink()
+    client = Scripted('{"bad":1}', '{"bad":2}', "x", "y")
+    rep = await structured_report(client, role="fast", prompt="go", schema=Tiny, trace=sink)
+    assert rep.value is None
+    kinds = [r["event"] for r in sink.rows]
+    # initial + repair + one field-split call per Tiny field (name, count) + the drop.
+    assert kinds == ["llm_call", "llm_call", "llm_call", "llm_call", "error"]
+    assert [r["detail"]["stage"] for r in sink.rows[:4]] == [
+        "initial", "repair", "field_split", "field_split"]
+    assert sink.rows[-1]["detail"]["reasons"] == rep.errors
+    assert rep.errors, "the error row must carry the accumulated drop reasons"
+
+
+async def test_structured_convenience_wrapper_forwards_trace():
+    sink = MemoryTraceSink()
+    client = Scripted('{"name":"a","count":2}')
+    value = await structured(client, role="fast", prompt="go", schema=Tiny, trace=sink)
+    assert value == Tiny(name="a", count=2)
+    assert [r["event"] for r in sink.rows] == ["llm_call"]
