@@ -1,0 +1,9 @@
+{
+  "hits": [
+    {
+      "url": "https://vendor-docs.test/opinion-queue-complexity",
+      "title": "Opinion Queue Complexity",
+      "snippet": "The architecture would need a queue, which adds complexity."
+    }
+  ]
+}

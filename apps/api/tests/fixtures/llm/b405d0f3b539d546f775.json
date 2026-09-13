@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": \"44444444-4444-4444-4444-444444444444\", \"new_assumption\": null, \"direction\": \"refutes\", \"variable\": \"stripe_api_price\", \"value_num\": 2.9, \"value_min\": null, \"value_max\": null, \"unit\": \"percent_plus_30_cents\", \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://vendor-docs.test/stripe-api-price\", \"source_tier\": 2, \"excerpt\": \"Standard pricing is 2.9% plus 30 cents per charge.\", \"chair\": \"dependencies\"}"
+}

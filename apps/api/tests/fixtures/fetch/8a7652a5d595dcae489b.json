@@ -1,0 +1,5 @@
+{
+  "status": 200,
+  "text": "Api Rate Limit. The endpoint is limited to 100 requests per minute. This page documents third-party terms.",
+  "content_type": "text/html"
+}

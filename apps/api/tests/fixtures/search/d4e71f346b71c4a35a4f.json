@@ -1,0 +1,9 @@
+{
+  "hits": [
+    {
+      "url": "https://vendor-docs.test/api-rate-limit",
+      "title": "Api Rate Limit",
+      "snippet": "The endpoint is limited to 100 requests per minute."
+    }
+  ]
+}

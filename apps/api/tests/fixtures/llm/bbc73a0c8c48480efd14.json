@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": \"44444444-4444-4444-4444-444444444444\", \"new_assumption\": null, \"direction\": \"refutes\", \"variable\": \"api_rate_limit\", \"value_num\": 100, \"value_min\": null, \"value_max\": null, \"unit\": \"requests_per_minute\", \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://vendor-docs.test/api-rate-limit\", \"source_tier\": 2, \"excerpt\": \"The endpoint is limited to 100 requests per minute.\", \"chair\": \"dependencies\"}"
+}
