@@ -66,6 +66,17 @@ def test_r1_does_not_trigger_cross_exam_for_medium_criticality():
     assert len(r1) == 1 and r1[0].triggers_cross_exam is False
 
 
+def test_r1_ignores_a_low_tier_supporting_item():
+    """Both items must be tier <= 2. The existing test only exercises a
+    low-tier REFUTES item, so a filter applied to just one side would pass
+    it. Forum anecdote cannot start a fight from either direction."""
+    got = detect_conflicts([ConflictInput(
+        assumption=a(), target_scope=IN_SMB,
+        evidence=[e("e1", direction="supports", tier=4),
+                  e("e2", direction="refutes", tier=1)])])
+    assert not [c for c in got if c.rule is ConflictRule.R1]
+
+
 # ── R2: numeric divergence beyond the tolerance band ────────────────────────
 def test_r2_fires_beyond_the_ten_percent_band():
     got = detect_conflicts([ConflictInput(
@@ -183,6 +194,24 @@ def test_r3_handles_zero_evidence_value_without_dividing_by_zero():
     assert isinstance(got, list)      # must not raise
 
 
+def test_r3_does_not_fire_at_exactly_twenty_five_percent():
+    """The threshold is > 0.25, not >=. A founder claiming 125 against
+    evidence of 100 is exactly at the band and is not yet contradicted."""
+    got = detect_conflicts([ConflictInput(
+        assumption=a(origin="founder", var="price_monthly", val=125.0),
+        target_scope=IN_SMB,
+        evidence=[e("e1", variable="price_monthly", value=100.0)])])
+    assert not [c for c in got if c.rule is ConflictRule.R3]
+
+
+def test_r3_fires_just_beyond_twenty_five_percent():
+    got = detect_conflicts([ConflictInput(
+        assumption=a(origin="founder", var="price_monthly", val=125.5),
+        target_scope=IN_SMB,
+        evidence=[e("e1", variable="price_monthly", value=100.0)])])
+    assert [c for c in got if c.rule is ConflictRule.R3]
+
+
 # ── R4: silence is a finding ────────────────────────────────────────────────
 def test_r4_fires_for_a_critical_assumption_with_no_evidence():
     got = detect_conflicts([ConflictInput(assumption=a(criticality="blocking"),
@@ -229,6 +258,17 @@ def test_r5_does_not_fire_when_there_is_no_evidence_at_all():
                                           evidence=[])])
     assert not [c for c in got if c.rule is ConflictRule.R5]
     assert [c for c in got if c.rule is ConflictRule.R4]
+
+
+def test_r5_fires_when_evidence_is_narrower_than_the_target_scope():
+    """R5 asks whether evidence COVERS the founder's target, which is
+    directional. Evidence about IN-smb does not cover a GLOBAL-smb target,
+    even though the two scopes overlap. Using symmetric overlap here would
+    silently accept partial evidence as full coverage."""
+    got = detect_conflicts([ConflictInput(
+        assumption=a(), target_scope=Scope(geo="GLOBAL", segment="smb"),
+        evidence=[e("e1", scope=Scope(geo="IN", segment="smb"))])])
+    assert [c for c in got if c.rule is ConflictRule.R5]
 
 
 # ── engine-level properties ─────────────────────────────────────────────────
