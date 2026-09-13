@@ -1,6 +1,6 @@
 import pytest
 
-from jury.engines.diff import causal_sentence, compute_diff
+from jury.engines.diff import DIFF_ORDER, DiffEntry, causal_sentence, compute_diff
 
 V1 = {
     "assumptions": {"a-price": {"statement": "pricing_wtp", "status": "uncertain"}},
@@ -139,7 +139,82 @@ def test_causal_sentence_leads_cleanly_with_a_breakpoint_change():
     sentence must not start mid-clause with a dangling 'which'."""
     v1 = {**V1, "assumptions": {}, "parameters": {}}
     v2 = {**V2, "assumptions": {}, "parameters": {},
+          "evidence_counts": V1["evidence_counts"],   # isolate: no evidence_added
           "confidence": V1["confidence"], "verdict": V1["verdict"]}
     sentence = causal_sentence(compute_diff(v1, v2))
     assert not sentence.lower().startswith("which")
     assert sentence[0].isupper()
+
+
+def test_worked_example_causal_sentence_now_includes_the_evidence_that_caused_it():
+    """V1->V2 contains a genuine evidence_added entry (3 items from customer,
+    tier 4) that a prior version of causal_sentence silently dropped. Once
+    every diff type renders (see the per-type tests below), that clause
+    leads the sentence -- so the previously-reported worked-example string
+    ('pricing_wtp moved uncertain -> refuted, which moved price_monthly ...
+    Verdict changed PROCEED -> PIVOT.') is no longer the literal output; it
+    is now prefixed with the evidence clause. Pinning the exact string here
+    makes that change visible rather than silent."""
+    sentence = causal_sentence(compute_diff(V1, V2))
+    assert sentence == (
+        "3 new evidence items landed (3 from customer), pricing_wtp moved "
+        "uncertain → refuted, which moved price_monthly from founder_asserted "
+        "499.0 to evidence_backed 249.0, which moved the break-even delivery "
+        "cost from 38.0 to 19.0. Verdict changed PROCEED → PIVOT."
+    )
+
+
+# ── Finding 1: every diff type must render, never a bare "." ────────────────
+
+_SAMPLE_ENTRY: dict[str, DiffEntry] = {
+    "assumption_status_change": DiffEntry(
+        "assumption_status_change", "a1", "uncertain", "refuted",
+        {"statement": "foo"}),
+    "assumption_discovered": DiffEntry(
+        "assumption_discovered", "a2", None, "no_evidence",
+        {"statement": "supply liquidity", "discovered_by": "precedent"}),
+    "evidence_added": DiffEntry(
+        "evidence_added", "ledger", None, 3,
+        {"by_chair": {"market": 3}, "by_tier": {"1": 3}}),
+    "conflict_resolved": DiffEntry(
+        "conflict_resolved", "c1", "open", "conceded",
+        {"kind": "founder_vs_world", "conceding_chair": "market"}),
+    "parameter_provenance_change": DiffEntry(
+        "parameter_provenance_change", "price_monthly",
+        "founder_asserted", "evidence_backed",
+        {"value_before": 499.0, "value_after": 249.0}),
+    "breakpoint_moved": DiffEntry(
+        "breakpoint_moved", "delivery_cost", 38.0, 19.0, {}),
+    "confidence_change": DiffEntry(
+        "confidence_change", "evidence_confidence", 52.0, 61.0,
+        {"components_moved": ["coverage"]}),
+    "verdict_change": DiffEntry("verdict_change", "verdict", "PROCEED", "PIVOT", {}),
+}
+
+
+def test_no_diff_type_renders_a_bare_period():
+    """Every diff type must contribute a clause. A lone unrendered entry
+    previously produced '.', which is neither a sentence nor the empty
+    string the contract promises for 'nothing changed'."""
+    for entry_type in DIFF_ORDER:
+        sentence = causal_sentence([_SAMPLE_ENTRY[entry_type]])
+        assert sentence not in (".", ""), entry_type
+        assert not sentence.startswith("."), entry_type
+
+
+def test_causal_sentence_renders_a_lone_assumption_discovered():
+    sentence = causal_sentence([_SAMPLE_ENTRY["assumption_discovered"]])
+    assert "supply liquidity" in sentence
+    assert "precedent" in sentence
+
+
+def test_causal_sentence_renders_a_lone_evidence_added():
+    sentence = causal_sentence([_SAMPLE_ENTRY["evidence_added"]])
+    assert "3" in sentence
+    assert "market" in sentence
+
+
+def test_causal_sentence_renders_a_lone_conflict_resolved():
+    sentence = causal_sentence([_SAMPLE_ENTRY["conflict_resolved"]])
+    assert "conceded" in sentence
+    assert "market" in sentence

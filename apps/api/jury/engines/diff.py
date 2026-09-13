@@ -177,10 +177,35 @@ def causal_sentence(entries: list[DiffEntry]) -> str:
 
     parts: list[str] = []
 
+    # Discovery and new evidence are upstream causes: they read naturally as
+    # leading into a status change, so they are checked first.
+    discovered = by_type.get("assumption_discovered")
+    if discovered:
+        chair = discovered.detail.get("discovered_by")
+        who = f" while investigating {chair}" if chair else ""
+        parts.append(f"{discovered.detail.get('statement') or discovered.subject} "
+                     f"was newly surfaced{who}")
+
+    added = by_type.get("evidence_added")
+    if added:
+        by_chair = added.detail.get("by_chair", {})
+        chairs = ", ".join(f"{n} from {c}" for c, n in sorted(by_chair.items()))
+        parts.append(f"{added.after} new evidence item"
+                     f"{'' if added.after == 1 else 's'} landed"
+                     + (f" ({chairs})" if chairs else ""))
+
     status = by_type.get("assumption_status_change")
     if status:
         name = status.detail.get("statement") or status.subject
         parts.append(f"{name} moved {status.before} → {status.after}")
+
+    # Conflict resolution follows the status change it typically enables.
+    resolved = by_type.get("conflict_resolved")
+    if resolved:
+        chair = resolved.detail.get("conceding_chair")
+        how = f", {chair} conceding" if chair else ""
+        parts.append(f"a {resolved.detail.get('kind', 'conflict')} conflict "
+                     f"was {resolved.after}{how}")
 
     param = by_type.get("parameter_provenance_change")
     if param:
@@ -195,8 +220,10 @@ def causal_sentence(entries: list[DiffEntry]) -> str:
                   f"from {bp.before} to {bp.after}")
         parts.append(f"which {clause}" if parts else _lead(clause))
 
+    # Evidence Confidence is a coarse aggregate: shown only when nothing more
+    # specific already explains what happened.
     conf = by_type.get("confidence_change")
-    if conf and not (status or param or bp):
+    if conf and not (discovered or added or status or resolved or param or bp):
         moved = ", ".join(conf.detail.get("components_moved", []))
         parts.append(f"Evidence Confidence moved {conf.before} → {conf.after} "
                      f"({moved})")
