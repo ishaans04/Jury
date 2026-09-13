@@ -236,9 +236,69 @@ Two more caught by implementers and confirmed: `cac_buyer` silently lost its bre
 ---
 
 
-## Phase 2 — LLM layer, offline transport, tracing
+## Phase 2 — LLM layer, offline transport, tracing ✅
 
-_Not started._
+**Completed 2026-09-13.** Commits `c64a8eb`..`0e6b2d9` on `build/jury-phases-0-7`.
+
+### What was built
+
+| Task | Module | Deliverable |
+|---|---|---|
+| 2.1 | `transport/` | `LLMClient`/`SearchClient`/`FetchClient`/`KV` Protocols, fixture + live implementations, `build_transports` selector |
+| 2.2 | `llm/models.py`, `gateway.py`, `cache.py` | Single model-ID map, fallback chain, retry policy, budget cap, prompt-hash cache |
+| 2.3 | `llm/structured.py` | The five-stage repair loop |
+| 2.4 | `tracing/events.py`, `db/pool.py` | `run_events` sink + `@traced` decorator |
+
+### Gate command and actual output
+
+```
+$ cd apps/api && env -u GROQ_API_KEY -u BRAVE_API_KEY -u TAVILY_API_KEY     -u EXA_API_KEY -u REDDIT_CLIENT_ID -u REDDIT_CLIENT_SECRET     -u PRODUCTHUNT_TOKEN -u UPSTASH_REDIS_REST_URL -u UPSTASH_REDIS_REST_TOKEN     -u SUPABASE_SERVICE_ROLE_KEY JURY_OFFLINE=1 uv run pytest -q
+300 passed in 22.14s
+```
+
+**The whole suite passes with every credential unset.** That is the phase's central claim, and it is what makes every later phase verifiable before a single API key exists.
+
+Escalation verified against the **real `ClaimRecord`**, not a toy schema:
+
+```
+valid first          stages=initial                                -> ClaimRecord
+fenced json          stages=initial                                -> ClaimRecord
+prose-wrapped        stages=initial                                -> ClaimRecord
+invalid then valid   stages=initial->repair                        -> ClaimRecord
+all garbage          stages=initial->repair->field_split->dropped  -> None
+json_mode on every structured call: True
+dropped claim returns None, reason recorded: True
+```
+
+### Defects found and fixed during review
+
+Six more, all in the plan's reference code.
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| 1 | The retry loop retried the **same** throttled model before advancing tiers | Contradicted the requirement and failed the plan's own `calls[0] != calls[1]` assertion |
+| 2 | The response cache key omitted `json_mode` | A cached plain-text response served to a JSON-mode caller, which then never reached the provider with `response_format` set — silently defeating mitigation 1 of the repair loop |
+| 3 | Quota and transient errors were treated identically | A single network blip permanently downgraded the run's highest-value calls to a weaker model. Split: quota advances immediately, transient retries once at the preferred tier |
+| 4 | The budget check was a check-then-increment race | Concurrent callers could both pass before either incremented. Phase 4 fans five chairs out against a shared gateway, so this was two phases from biting |
+| 5 | `schema_prompt_block` collapsed **enum and nested-object fields to "any"** | Would have made the field-split stage *guarantee* failure for `ClaimRecord`'s `direction`, `chair`, `scope` and `new_assumption` — the very schema it exists to serve |
+| 6 | `_extract_json` returned the **first** balanced object without checking it parsed | Because the schema is embedded in every prompt, a model echoing an example of it is a natural failure mode. A decorative example was returned as a clean success with `stages == ["initial"]` — semantically wrong data reported as correct, which is worse than a dropped claim |
+
+Defect 6 took two rounds: the first fix handled loose objects but the **fenced** path still scanned only inside the first fence and discarded everything else, so a fenced example still beat a real answer. Now all fenced blocks and all loose objects form one source-ordered candidate list, and the last one that validates wins.
+
+### Corrections to controller instructions
+
+Twice the implementer was right and the instruction was wrong, and said so rather than complying:
+
+- I specified "take the **first** candidate that validates". That fails its own motivating example — when both the decoration and the real answer validate, first-preference still returns the decoration. Last-preference was implemented instead.
+- I proposed "a fenced block should always outrank loose text". That fails the fenced-example-then-loose-real case. Source order with last-preference is the correct unifying rule.
+
+### Accepted trade-offs, documented not hidden
+
+- **Last-preference is a heuristic.** A response ending with a postamble example (`"here is my answer {real} — for instance a wrong one would be {decoy}"`) picks the decoy. Accepted because chatty preambles are far more common than chatty postambles containing JSON for this model class. The escape hatch — score candidates by required-field coverage rather than position — is recorded in the docstring for whoever sees wrong-object selection in real traces.
+- **The single-pass scan is not purely behaviour-preserving.** A dangling unclosed `{` with a well-formed object nested inside now yields nothing where the old quadratic scan recovered the inner object. That shape is a response truncated mid-object, where the inner object is a sub-field rather than the answer and would fail schema validation regardless — so the repair loop's re-prompt is the correct path. Parse time on 20,000 unterminated braces went from **~36s to 0.0074s**.
+
+---
+
 
 ## Phase 3 — Retrieval, verification, Market chair
 
