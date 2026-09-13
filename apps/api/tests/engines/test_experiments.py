@@ -14,6 +14,11 @@ MAP = {"price_monthly": "a-price", "delivery_cost": "a-delivery",
        "take_rate": "a-take", "cac": "a-cac", "churn_monthly": "a-churn",
        "aov": "a-aov"}
 
+# Modelled economics values for the four methods whose criterion threshold is
+# not self-contained (see MethodSpec.threshold_source). Arbitrary but
+# plausible numbers; only their presence/absence matters to these tests.
+MODELLED = {"delivery_cost": 19.0, "cac": 8000.0, "aov": 45.0, "churn_monthly": 0.05}
+
 
 def test_evidence_backed_parameters_are_excluded():
     """PRD §16.6: filter provenance = 'founder_asserted'. There is nothing to
@@ -31,13 +36,13 @@ def test_highest_sensitivity_guess_becomes_experiment_one():
 
 def test_priority_is_dense_and_starts_at_one():
     out = generate_experiments([s("price_monthly", 3.0), s("delivery_cost", 2.0),
-                                s("cac", 1.0)], MAP)
+                                s("cac", 1.0)], MAP, modelled=MODELLED)
     assert [e.priority for e in out] == [1, 2, 3]
 
 
 def test_top_k_is_respected():
     entries = [s(v, float(9 - i)) for i, v in enumerate(MAP)]
-    assert len(generate_experiments(entries, MAP, top_k=3)) == 3
+    assert len(generate_experiments(entries, MAP, top_k=3, modelled=MODELLED)) == 3
 
 
 def test_every_experiment_has_a_non_null_kill_criterion():
@@ -59,7 +64,7 @@ def test_price_maps_to_presale_or_fake_door():
 
 
 def test_delivery_cost_maps_to_supplier_quote_and_is_free():
-    out = generate_experiments([s("delivery_cost", 2.0)], MAP)
+    out = generate_experiments([s("delivery_cost", 2.0)], MAP, modelled=MODELLED)
     assert out[0].method is ExperimentMethod.SUPPLIER_QUOTE
     assert out[0].est_cost == 0
 
@@ -70,20 +75,22 @@ def test_take_rate_maps_to_interview_script():
 
 
 def test_cac_maps_to_landing_ctr():
-    out = generate_experiments([s("cac", 2.0)], MAP)
+    out = generate_experiments([s("cac", 2.0)], MAP, modelled=MODELLED)
     assert out[0].method is ExperimentMethod.LANDING_CTR
 
 
 def test_retention_maps_to_a_documented_proxy_with_a_stated_limitation():
     """Spec §26.6: no 30-day experiment measures retention honestly, and the
     product must state that rather than paper over it."""
-    out = generate_experiments([s("churn_monthly", 2.0)], MAP)
+    out = generate_experiments([s("churn_monthly", 2.0)], MAP, modelled=MODELLED)
     assert out[0].method is ExperimentMethod.DOCUMENTED_PROXY
     assert out[0].limitation and "retention" in out[0].limitation.lower()
 
 
 def test_every_experiment_has_cost_and_duration():
-    out = generate_experiments([s(v, 1.0) for v in MAP], MAP)
+    out = generate_experiments([s(v, 1.0) for v in MAP], MAP,
+                               top_k=len(MAP), modelled=MODELLED)
+    assert len(out) == len(MAP)
     assert all(e.est_days is not None and e.est_cost is not None for e in out)
 
 
@@ -108,3 +115,48 @@ def test_instructions_are_substantive_not_a_placeholder():
     out = generate_experiments([s("price_monthly", 2.0)], MAP)
     assert len(out[0].instructions) >= 40
     assert "TODO" not in out[0].instructions
+
+
+# ── threshold_source: skip rather than emit an unfalsifiable criterion ──────
+
+def test_experiment_is_skipped_when_no_modelled_dict_is_supplied():
+    """delivery_cost's criterion has no self-contained threshold. Without a
+    modelled value it must be skipped, not emitted with a placeholder that
+    always passes or always fails."""
+    out = generate_experiments([s("delivery_cost", 2.0)], MAP)
+    assert out == []
+
+
+def test_experiment_is_skipped_when_modelled_dict_omits_its_key():
+    out = generate_experiments([s("delivery_cost", 2.0)], MAP,
+                               modelled={"cac": 8000.0})
+    assert out == []
+
+
+def test_experiment_is_emitted_with_the_substituted_threshold_when_available():
+    out = generate_experiments([s("delivery_cost", 2.0)], MAP,
+                               modelled={"delivery_cost": 21.5})
+    assert len(out) == 1
+    assert out[0].criterion_spec.threshold == 21.5
+    assert "21.5" in out[0].kill_criterion
+
+
+def test_priority_stays_dense_across_a_threshold_skip():
+    out = generate_experiments(
+        [s("price_monthly", 3.0), s("delivery_cost", 2.0), s("cac", 1.0)],
+        MAP, modelled={"cac": 8000.0})   # delivery_cost has no modelled value
+    assert [e.target_variable for e in out] == ["price_monthly", "cac"]
+    assert [e.priority for e in out] == [1, 2]
+
+
+def test_self_contained_specs_are_unaffected_by_omitting_modelled():
+    """price_monthly, take_rate and regulatory_permitted carry a real,
+    fixed threshold and must not be touched by the new parameter at all."""
+    out = generate_experiments(
+        [s("price_monthly", 3.0), s("take_rate", 2.0)], MAP)
+    assert [e.target_variable for e in out] == ["price_monthly", "take_rate"]
+
+    out2 = generate_experiments([s("regulatory_permitted", 1.0)],
+                                {"regulatory_permitted": "a-reg"})
+    assert len(out2) == 1
+    assert out2[0].criterion_spec.threshold == 90

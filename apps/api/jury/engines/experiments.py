@@ -24,21 +24,40 @@ class MethodSpec:
     est_cost: float
     est_days: int
     limitation: str | None = None
+    # Name of the modelled value (from the `modelled` dict passed to
+    # generate_experiments) that this method's criterion.threshold must be
+    # filled in from. None means the criterion is already self-contained
+    # (its threshold is a real, fixed number, not something borrowed from
+    # a solved economics model). When set and the caller does not supply a
+    # matching value, the experiment is skipped rather than emitted with a
+    # placeholder threshold that would always pass or always fail.
+    threshold_source: str | None = None
 
+
+# Prose template for the four methods whose kill criterion depends on a
+# modelled value. Applied only once that value is actually available;
+# {value:g} is interpolated with the real number so the founder reads a
+# concrete line rather than a reference to "the model".
+_THRESHOLD_KILL_CRITERIA: dict[str, str] = {
+    "delivery_cost": "Median written quote exceeds the modelled break-even delivery cost of {value:g}.",
+    "cac": "Measured cost per signup exceeds the modelled CAC of {value:g}.",
+    "aov": "Median attempted basket value falls below the asserted AOV of {value:g}.",
+    "churn_monthly": (
+        "Comparable published churn exceeds the modelled monthly churn of "
+        "{value:g}, and no structural reason for a difference is documented."),
+}
 
 # PRD §16.6 variable-to-method mapping. Keyed by exact variable name; prefix
 # fallbacks below catch families like wtp_*.
 #
-# NOTE: several criterion thresholds below (delivery_cost, cac, aov,
-# churn_monthly) are placeholders (0.0) because this engine's interface takes
-# only the sensitivity ranking and the assumption map -- it has no channel for
-# the actual computed break-even/CAC/AOV values from the economics engine.
-# The kill_criterion prose already refers to "the break-even delivery cost
-# from the model" / "the modelled CAC", so a caller assembling the final,
-# persisted experiment MUST overwrite criterion_spec.threshold with the real
-# modelled value before the criterion is usable to gate a real experiment.
-# Left as-is per the brief's fixed interface; flagged rather than silently
-# fixed since closing this gap would require widening the function signature.
+# Four of these (delivery_cost, cac, aov, churn_monthly) declare
+# threshold_source: their criterion has no self-contained number and must be
+# filled in from a solved economics model at call time (see
+# generate_experiments). Without a matching entry in `modelled`, the
+# experiment is skipped rather than emitted with an unsatisfiable or
+# trivially-true placeholder threshold -- a criterion that always returns the
+# same verdict regardless of the result is worse than no criterion, because
+# it looks pre-registered while deciding nothing.
 VARIABLE_METHODS: dict[str, MethodSpec] = {
     "price_monthly": MethodSpec(
         method=ExperimentMethod.PRESALE,
@@ -67,10 +86,10 @@ VARIABLE_METHODS: dict[str, MethodSpec] = {
             "Request written quotes from at least 5 providers for your actual "
             "volume, weight and route. Use the median of the written quotes, not "
             "the cheapest, and keep the emails as your source."),
-        kill_criterion="Median written quote exceeds the break-even delivery cost from the model.",
+        kill_criterion="Median written quote exceeds the modelled break-even delivery cost.",
         criterion=CriterionSpec(metric="median_quote", comparator=Comparator.LTE,
                                 threshold=0.0, n=5),
-        est_cost=0.0, est_days=5),
+        est_cost=0.0, est_days=5, threshold_source="delivery_cost"),
     "cac": MethodSpec(
         method=ExperimentMethod.LANDING_CTR,
         instructions=(
@@ -80,7 +99,7 @@ VARIABLE_METHODS: dict[str, MethodSpec] = {
         kill_criterion="Measured cost per signup exceeds the modelled CAC.",
         criterion=CriterionSpec(metric="cost_per_signup", comparator=Comparator.LTE,
                                 threshold=0.0, n=None),
-        est_cost=10000.0, est_days=14),
+        est_cost=10000.0, est_days=14, threshold_source="cac"),
     "aov": MethodSpec(
         method=ExperimentMethod.FAKE_DOOR,
         instructions=(
@@ -90,7 +109,7 @@ VARIABLE_METHODS: dict[str, MethodSpec] = {
         kill_criterion="Median attempted basket value falls below the asserted AOV.",
         criterion=CriterionSpec(metric="median_basket", comparator=Comparator.GTE,
                                 threshold=0.0, n=30),
-        est_cost=5000.0, est_days=10),
+        est_cost=5000.0, est_days=10, threshold_source="aov"),
     "churn_monthly": MethodSpec(
         method=ExperimentMethod.DOCUMENTED_PROXY,
         instructions=(
@@ -103,7 +122,7 @@ VARIABLE_METHODS: dict[str, MethodSpec] = {
             "structural reason for a difference is documented."),
         criterion=CriterionSpec(metric="comparable_churn_monthly",
                                 comparator=Comparator.LTE, threshold=0.0, n=2),
-        est_cost=0.0, est_days=3,
+        est_cost=0.0, est_days=3, threshold_source="churn_monthly",
         limitation=(
             "No 30-day experiment can measure retention honestly. This is a "
             "documented proxy, not a measurement, and the verdict treats it as such.")),
@@ -146,14 +165,26 @@ def generate_experiments(
     sensitivity: list[SensitivityEntry],
     assumption_for_variable: dict[str, str],
     top_k: int = 5,
+    modelled: dict[str, float] | None = None,
 ) -> list[ExperimentDraft]:
     """Top-k founder-asserted, highest-sensitivity parameters, as experiments (F13).
 
     Every returned draft carries a non-null kill criterion and a machine-evaluable
     criterion_spec (P9).
+
+    `modelled` supplies the real, solved economics values (break-even delivery
+    cost, CAC, AOV, monthly churn) that four of the methods need to make their
+    criterion honest. A method whose spec declares `threshold_source` and
+    finds no matching entry in `modelled` is skipped entirely rather than
+    emitted with a placeholder threshold: a criterion that always passes or
+    always fails regardless of the result is worse than a missing one, since
+    it looks pre-registered while deciding nothing. Priority stays dense
+    across such a skip, exactly as it already does across an unmapped
+    variable.
     """
     guesses = [s for s in sensitivity if s.provenance is Provenance.FOUNDER_ASSERTED]
     guesses.sort(key=lambda s: (-abs(s.elasticity), s.variable))
+    modelled = modelled or {}
 
     drafts: list[ExperimentDraft] = []
     for entry in guesses:
@@ -165,13 +196,24 @@ def generate_experiments(
         spec = _method_for(entry.variable)
         if spec is None:
             continue
+
+        criterion = spec.criterion
+        kill_criterion = spec.kill_criterion
+        if spec.threshold_source is not None:
+            if spec.threshold_source not in modelled:
+                continue     # no modelled value: an honest absence, not a guess
+            value = modelled[spec.threshold_source]
+            criterion = criterion.model_copy(update={"threshold": value})
+            kill_criterion = _THRESHOLD_KILL_CRITERIA[spec.threshold_source].format(
+                value=value)
+
         drafts.append(ExperimentDraft(
             assumption_id=assumption_id,
             target_variable=entry.variable,
             method=spec.method,
             instructions=spec.instructions,
-            kill_criterion=spec.kill_criterion,
-            criterion_spec=spec.criterion,
+            kill_criterion=kill_criterion,
+            criterion_spec=criterion,
             est_cost=spec.est_cost,
             est_days=spec.est_days,
             priority=len(drafts) + 1,
