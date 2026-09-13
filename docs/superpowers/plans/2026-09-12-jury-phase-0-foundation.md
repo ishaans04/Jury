@@ -712,8 +712,17 @@ This is the migration that makes P6 real. Revocation covers `service_role` too, 
 -- (FORCE ROW LEVEL SECURITY does not apply to it) and fires no row-level
 -- trigger, so without this line service_role can wipe the whole ledger in one
 -- statement and cascade into position_deltas.
-revoke update, delete, truncate on evidence_items
+-- DELETE is deliberately NOT revoked from the table owner. Referential actions
+-- run as the owner, and evidence_items.project_id is declared ON DELETE CASCADE,
+-- so revoking DELETE from the owner makes it impossible to delete a project or
+-- an auth user at all -- the FK check needs a KEY SHARE lock on this table.
+-- P6 protects against CORRECTIONS silently rewriting history; erasing a whole
+-- project at the owner's request falsifies nothing. So UPDATE and TRUNCATE stay
+-- shut for everyone, and DELETE is reachable only as a cascade.
+revoke update, truncate on evidence_items
   from anon, authenticated, service_role, postgres;
+revoke delete on evidence_items
+  from anon, authenticated, service_role;
 
 alter table evidence_items force row level security;   -- applies RLS to the table owner
 
@@ -738,8 +747,9 @@ end $$;
 
 create trigger evidence_no_update before update on evidence_items
   for each row execute function jury_evidence_is_immutable();
-create trigger evidence_no_delete before delete on evidence_items
-  for each row execute function jury_evidence_is_immutable();
+-- No BEFORE DELETE trigger: it would block the project/user erasure cascade
+-- unconditionally. DELETE is already unreachable from every application role
+-- via the REVOKE above.
 -- TRUNCATE triggers are statement-level only; FOR EACH ROW is rejected here.
 -- This is what stops a genuine superuser (supabase_admin), which bypasses
 -- the REVOKE above.
