@@ -184,10 +184,13 @@ async def test_source_upsert_is_idempotent_on_canonical_url(pool):
     assert a == b
 
 
-async def test_source_upsert_refreshes_metadata_on_repeat_fetch(pool):
-    """`sources.http_status` is schema-constrained to 2xx only (P1: a source
-    row exists at all only because it was fetched successfully), so both
-    calls here use a 2xx status and vary tier/title instead."""
+async def test_source_upsert_does_not_overwrite_existing_metadata(pool):
+    """`sources` has deliberately no UPDATE policy (0006_sources_insert_policy.sql):
+    on a globally-shared table nobody individually owns, an UPDATE grant
+    would let any authenticated user rewrite another user's cached source
+    metadata. `upsert` is therefore `ON CONFLICT DO NOTHING`, not
+    `DO UPDATE` -- the first insert's metadata wins and a second call for
+    the same canonical_url is a pure no-op that changes nothing."""
     repo = SourceRepo(pool)
     first = await repo.upsert("https://x.test/q", "x.test", 3, "Old Title", 200)
     second = await repo.upsert("https://x.test/q", "x.test", 1, "New Title", 201)
@@ -197,7 +200,7 @@ async def test_source_upsert_refreshes_metadata_on_repeat_fetch(pool):
             await cur.execute("select tier, title, http_status from sources where id = %s",
                               (second,))
             tier, title, status = await cur.fetchone()
-    assert (tier, title, status) == (1, "New Title", 201)
+    assert (tier, title, status) == (3, "Old Title", 200)
 
 
 # ── AssumptionRepo ───────────────────────────────────────────────────────

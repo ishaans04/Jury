@@ -58,9 +58,15 @@ def _row_id(row) -> str:
 
 class SourceRepo:
     """`sources` is shared, globally-deduplicated reference data (PRD §14.4:
-    "a fetched pricing page is not private data"), not an evidence-integrity
-    boundary -- unlike `evidence_items`, updating a source row (a fresher
-    HTTP status, a filled-in title) is normal, so `upsert` is a real upsert.
+    "a fetched pricing page is not private data") written by every
+    authenticated caller, not just the row's original inserter -- which is
+    exactly why it must NOT have an UPDATE policy (0006_sources_insert_policy.sql):
+    on a table nobody individually owns, an UPDATE grant would let any
+    authenticated user silently rewrite another user's cached source
+    metadata. `upsert` is therefore idempotent via `ON CONFLICT DO NOTHING`
+    plus a follow-up read, never `DO UPDATE` -- the first insert's metadata
+    wins and sticks; every later call for the same `canonical_url` is a
+    pure no-op that just returns the existing row's id.
     """
 
     def __init__(self, pool) -> None:
@@ -69,25 +75,27 @@ class SourceRepo:
     async def upsert(self, canonical_url: str, domain: str, tier: int,
                      title: str | None, http_status: int,
                      storage_path: str | None = None) -> str:
-        """Idempotent on `canonical_url` (the table's own unique constraint).
-        A second call with the same URL returns the same id; whatever
-        metadata it carries becomes the row's current metadata (last write
-        wins) -- there is exactly one row per source, never a history of
-        them, so "current" is the only meaning `upsert` needs to have."""
+        """Idempotent on `canonical_url` (the table's own unique constraint)
+        without ever issuing an UPDATE: `ON CONFLICT DO NOTHING` means a
+        colliding insert returns no row (RETURNING only reports rows it
+        actually wrote), so a conflict is resolved with a plain SELECT of
+        the row that already exists instead."""
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "insert into sources "
                     "(canonical_url, domain, tier, title, http_status, storage_path) "
                     "values (%s, %s, %s, %s, %s, %s) "
-                    "on conflict (canonical_url) do update set "
-                    "domain = excluded.domain, tier = excluded.tier, "
-                    "title = excluded.title, http_status = excluded.http_status, "
-                    "storage_path = excluded.storage_path "
+                    "on conflict (canonical_url) do nothing "
                     "returning id",
                     (canonical_url, domain, tier, title, http_status, storage_path),
                 )
                 row = await cur.fetchone()
+                if row is None:
+                    await cur.execute(
+                        "select id from sources where canonical_url = %s",
+                        (canonical_url,))
+                    row = await cur.fetchone()
                 return _row_id(row)
 
 
