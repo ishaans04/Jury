@@ -233,6 +233,79 @@ def test_saas_churn_breakpoint_is_exact():
     assert bp["churn_monthly"].direction == "above"
 
 
+# ── _bracket_endpoint: bounded nudge must not skip past a near-boundary root ─
+def test_bracket_nudge_does_not_report_a_wrong_root_past_a_near_boundary_one():
+    """Regression for a review finding: _bracket_endpoint's nudge away from a
+    domain singularity must stay small enough that it cannot leap over a
+    genuine root sitting close to the boundary and land brentq on a
+    different, wrong root instead.
+
+    Adversarial objective (constructed during review): singular at x=0 (like
+    ltv_cac's zero-total-CAC sentinel), a genuine root at x=0.0009, and a
+    second, unrelated root at x=500000, over the wide range [0, 1e6] -- a
+    shape a future, non-monotonic template could produce even though none of
+    the four shipped templates do (every parameter here is strictly
+    monotonic against each objective, so at most one root ever exists today).
+
+    With the old, unbounded nudge (a step scaled to 1e-9 of the *full range*,
+    growing x10 over 8 iterations) the first probe landed at 1e-3 -- already
+    past the true root at 0.0009 and inside the positive region between the
+    two roots -- so the endpoint sign-check paired that positive value with
+    the negative value at the far bound and brentq confidently reported the
+    WRONG root, ~500000, as if it were a real business threshold. Verified
+    by hand-simulating the old step against this exact objective: it returns
+    500000.0.
+
+    With the bounded nudge (1e-12 of the range, growing x10 over 6 steps),
+    the first probe lands at 1e-6, still on the same (negative) side of the
+    near root as the singularity, so the endpoint sign-check no longer
+    manufactures a false bracket around the far root -- verified this
+    returns None (no sign change visible to the two-point check, since both
+    endpoints land negative). That is the one property this test pins down:
+    the wrong root must never come back. A "no breakpoint found" outcome is
+    correct and safe here; an invented number is not.
+    """
+    from jury.engines.economics.solver import _solve_breakpoint
+    from jury.engines.economics.templates import ParamSpec, Template
+
+    def adversarial(template, values, name, x):
+        if x == 0:
+            return float("inf")
+        return (x - 0.0009) * (500000.0 - x) / x
+
+    spec = ParamSpec(unit="unit", lo=0.0, hi=1_000_000.0, default=1.0)
+    fake_template = Template(key="adversarial_v1", params={"x": spec},
+                             compute=lambda v: None, primary_output="x")
+
+    bp = _solve_breakpoint(fake_template, {"x": 1.0}, "x", adversarial, "test_output")
+
+    assert bp is None or bp.threshold != pytest.approx(500000.0, rel=1e-3)
+
+
+def test_bracket_nudge_still_finds_a_genuine_near_boundary_root():
+    """Companion to the test above: confirm the bounded nudge has not traded
+    away its original purpose. With the confounding far root removed (hi kept
+    well below it), a genuine root sitting close to a domain singularity must
+    still be found -- this is the cac_buyer=800 case in miniature.
+    """
+    from jury.engines.economics.solver import _solve_breakpoint
+    from jury.engines.economics.templates import ParamSpec, Template
+
+    def near_root_only(template, values, name, x):
+        if x == 0:
+            return float("inf")
+        return x - 0.0009  # single root at 0.0009, no second root in range
+
+    spec = ParamSpec(unit="unit", lo=0.0, hi=1.0, default=0.5)
+    fake_template = Template(key="near_root_v1", params={"x": spec},
+                             compute=lambda v: None, primary_output="x")
+
+    bp = _solve_breakpoint(fake_template, {"x": 0.5}, "x", near_root_only, "test_output")
+
+    assert bp is not None
+    assert bp.threshold == pytest.approx(0.0009, abs=1e-6)
+
+
 def test_no_llm_is_reachable_from_the_economics_engine():
     """P8: economics is computed, not described. Guard the import boundary."""
     import inspect

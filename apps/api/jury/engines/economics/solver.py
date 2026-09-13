@@ -89,10 +89,24 @@ def _bracket_endpoint(template: Template, values: dict[str, float], name: str,
     everywhere except the single singular point. Stepping a hair inward
     evaluates the same objective just off that point, which changes nothing
     about the interior root.
+
+    The displacement is deliberately bounded to a negligible fraction of the
+    range: the step starts at 1e-12 of (toward - x) and grows x10 over 6
+    iterations, capping total displacement at roughly 1e-6 of the range. A
+    larger step is not safe in general -- for a non-monotonic objective, a
+    coarse nudge can jump past a genuine near-boundary root and land brentq
+    on a bracket around a *different, wrong* root, silently reporting a
+    fabricated threshold value rather than the true one. Every parameter in
+    the four shipped templates is strictly monotonic against each objective
+    (at most one root exists), so this cannot happen today, but the nudge
+    itself must not assume that invariant, since nothing enforces it for a
+    future template. A root sitting within one part in a million of a
+    singular boundary is not a meaningful business threshold anyway, so
+    bailing out there (rather than nudging further) is the honest outcome.
     """
-    step = (toward - x) * 1e-9 or math.copysign(1e-9, toward - x)
+    step = (toward - x) * 1e-12 or math.copysign(1e-12, toward - x)
     val = float("nan")
-    for _ in range(8):
+    for _ in range(6):
         try:
             val = objective(template, values, name, x)
         except (ZeroDivisionError, OverflowError, ValueError):
