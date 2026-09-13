@@ -74,6 +74,36 @@ def _ltv_cac_at(template: Template, values: dict[str, float],
     return out.ltv_cac - _VIABLE_LTV_CAC
 
 
+def _bracket_endpoint(template: Template, values: dict[str, float], name: str,
+                      objective, x: float, toward: float) -> tuple[float, float]:
+    """Evaluate `objective` at x, nudging inward (toward the other endpoint)
+    if x sits exactly on a domain singularity.
+
+    ltv_cac's denominator (total CAC) can be exactly zero at a CAC-type
+    parameter's own lo=0.0 when every other CAC-contributing parameter also
+    defaults to zero -- e.g. cac_buyer at lo=0 with cac_supplier=0 gives total
+    CAC=0, which ModelOutputs.ltv_cac reports as the +inf sentinel. That is a
+    genuine, correct value of the ratio at that exact point, but it is not a
+    number brentq can bracket against, and bailing out there would hide a
+    real, well-defined root (cac_buyer=800 in that example) that exists
+    everywhere except the single singular point. Stepping a hair inward
+    evaluates the same objective just off that point, which changes nothing
+    about the interior root.
+    """
+    step = (toward - x) * 1e-9 or math.copysign(1e-9, toward - x)
+    val = float("nan")
+    for _ in range(8):
+        try:
+            val = objective(template, values, name, x)
+        except (ZeroDivisionError, OverflowError, ValueError):
+            val = float("nan")
+        if math.isfinite(val):
+            return x, val
+        x += step
+        step *= 10
+    return x, val
+
+
 def _solve_breakpoint(template: Template, values: dict[str, float], name: str,
                       objective, output_label: str) -> Breakpoint | None:
     """Find where `objective` crosses zero over the parameter's plausible range.
@@ -83,17 +113,14 @@ def _solve_breakpoint(template: Template, values: dict[str, float], name: str,
     fabricating a threshold.
     """
     spec = template.params[name]
-    try:
-        f_lo = objective(template, values, name, spec.lo)
-        f_hi = objective(template, values, name, spec.hi)
-    except (ZeroDivisionError, OverflowError, ValueError):
-        return None
+    x_lo, f_lo = _bracket_endpoint(template, values, name, objective, spec.lo, spec.hi)
+    x_hi, f_hi = _bracket_endpoint(template, values, name, objective, spec.hi, spec.lo)
     if not (math.isfinite(f_lo) and math.isfinite(f_hi)) or f_lo * f_hi > 0:
         return None
 
     try:
         root = brentq(lambda x: objective(template, values, name, x),
-                      spec.lo, spec.hi, xtol=1e-9, maxiter=200)
+                      x_lo, x_hi, xtol=1e-9, maxiter=200)
     except (ValueError, RuntimeError):
         return None
     if not math.isfinite(root):
@@ -110,37 +137,21 @@ def _solve_breakpoint(template: Template, values: dict[str, float], name: str,
                       unit=spec.unit, output=output_label, sentence=sentence)
 
 
-def _affects_ltv(template: Template, values: dict[str, float], name: str) -> bool:
-    """True if flexing this parameter across its range changes LTV itself.
-
-    Distinguishes a genuine LTV-driven breakpoint (churn, via the lifetime
-    multiplier) from a parameter that only appears as an additive term in the
-    ltv_cac ratio's own denominator (a CAC component). The latter always has a
-    *trivial* root at cac == ltv regardless of which CAC sub-component is
-    flexed — every such parameter would "break" the business past some value
-    by construction, which is not a discovered economic mechanism, it is the
-    tautology that CAC must not exceed LTV. Gating the fallback on this keeps
-    "no breakpoint exists" true for parameters like cac_supplier that the
-    contribution-margin objective already correctly found nothing for.
-    """
-    spec = template.params[name]
-    probe_lo = dict(values); probe_lo[name] = spec.lo
-    probe_hi = dict(values); probe_hi[name] = spec.hi
-    try:
-        ltv_lo = template.compute(probe_lo).ltv
-        ltv_hi = template.compute(probe_hi).ltv
-    except (ZeroDivisionError, OverflowError, ValueError):
-        return True   # can't establish independence; don't suppress on error
-    if not (math.isfinite(ltv_lo) and math.isfinite(ltv_hi)):
-        return True
-    return not math.isclose(ltv_lo, ltv_hi, rel_tol=1e-9, abs_tol=1e-9)
-
-
 def _elasticity(template: Template, values: dict[str, float], name: str) -> float:
     """Proportional change in the primary output for a +/-20% parameter change.
 
     Averaging the up and down perturbation makes the measure symmetric, which
     matters because a tornado chart is read as a magnitude ranking.
+
+    Known limitation: the denominator is always the nominal PERTURBATION
+    (0.20), even when a probe gets clamped into [lo, hi] below. For a
+    parameter whose live value sits near a template bound, the actual applied
+    move can be smaller than 20%, which understates the reported elasticity
+    for that side (and, in the extreme of a value sitting exactly at a bound,
+    can zero out one side's contribution entirely). No fixture in this suite
+    triggers it — every default sits well inside its range — but it would
+    bite a parameter pinned at its bound. Accepted as a known limitation
+    rather than fixed here.
     """
     base = template.compute(values).contribution_margin
     x = values[name]
@@ -176,7 +187,7 @@ def solve(template_key: str, parameters: dict[str, Parameter]) -> ModelRunResult
     for name in template.params:
         bp = _solve_breakpoint(template, values, name, _margin_at,
                                "contribution_margin")
-        if bp is None and _affects_ltv(template, values, name):
+        if bp is None:
             bp = _solve_breakpoint(template, values, name, _ltv_cac_at, "ltv_cac")
         if bp is not None:
             breakpoints.append(bp)
