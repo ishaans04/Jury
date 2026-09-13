@@ -300,9 +300,91 @@ Twice the implementer was right and the instruction was wrong, and said so rathe
 ---
 
 
-## Phase 3 — Retrieval, verification, Market chair
+## Phase 3 — Retrieval, verification, Market chair ✅
 
-_Not started._
+**Completed 2026-09-14.** Commits `0a7e16d`..`dfd8c2f` on `build/jury-phases-0-7`.
+
+### What was built
+
+| Task | Module | Deliverable |
+|---|---|---|
+| 3.1 | `retrieval/ssrf.py` | Outbound URL guard for model-selected targets |
+| 3.2 | `retrieval/tiers.py` | Rule-based source tiering, model's claim overridden |
+| 3.3 | `retrieval/fetch.py`, `extract.py` | Tiered fetch, redirect guard, 24h dedup cache |
+| 3.4 | `retrieval/verify.py` | **Pre-persist verification — the integrity gate** |
+| 3.5 | `retrieval/search.py`, `budgets.py` | Per-chair routing with enforced budgets |
+| 3.6 | `db/repositories.py` | Insert-only evidence access |
+| 3.7 | `chairs/base.py`, `market.py` | Market chair end to end |
+| 3.8 | `retrieval/embed.py` | Local fastembed → pgvector |
+
+### Gate command and actual output
+
+```
+$ cd apps/api && env -u GROQ_API_KEY -u BRAVE_API_KEY ... JURY_OFFLINE=1 uv run pytest -q
+553 passed in 70.10s
+
+$ uv run pytest tests/retrieval/test_verify.py -k fabricated -q
+50 passed, 13 deselected          <- the phase gate: 50/50 fabricated companies rejected
+
+$ uv run pytest tests/retrieval/test_tiers_eval.py -q -s
+tier-assignment eval accuracy: 100.0% (100/100)
+```
+
+The integrity gate verified directly: excerpt present → accepted; non-2xx → rejected; excerpt absent → rejected; blocked URL → rejected **without fetching**; a model claiming tier 1 on a blog → reassigned to tier 3 by rule; **paraphrase rejected**; empty and whitespace-only excerpts rejected.
+
+### Security defects found and closed
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| 1 | **Trailing dot bypassed the entire host blocklist** | `localhost.`, `metadata.`, and `169.254.169.254.` all returned "ok". Resolvers treat a trailing dot as already-fully-qualified, so one extra character reached the **cloud metadata endpoint** — the highest-value SSRF target. A 24-case probe of the undotted forms missed it entirely; enumeration is not a substitute for canonicalisation |
+| 2 | `_host_as_ip` missed dotted-octal, dotted-hex and shorthand loopback | `0177.0.0.1`, `0x7f.0.0.1`, `127.1` — all resolved to loopback by curl and glibc |
+| 3 | **IDN homoglyph fold** | Fullwidth `ｌ` NFKC-folds to ASCII `l`, so `ｌocalhost` became `localhost`. Closed by rejecting non-ASCII hostnames |
+| 4 | `httpx.InvalidURL` is **not** an `HTTPError` | A hostile `Location: javascript:alert(1)` crashed the fetch **before** the redirect guard could run — httpx builds `next_request` on every 3xx even with redirects disabled |
+| 5 | `verify_claim` trusted its fetch client never to raise | A raising client or a `text=None` body crashed an investigator mid-run, where the design requires degrading to "less evidence" |
+| 6 | Non-2xx cache TTL was status-blind | A 503 was cached for 24h, recording a momentary outage as a day-long absence of evidence |
+| 7 | **`sources` had no INSERT policy** | Every source write failed on the real path. Tests passed only because the test connection *owns* the table and `sources` lacks FORCE RLS — a test running as the owner proves nothing about the production write path |
+| 8 | `EvidenceRepo`'s P6 test was a substring denylist | `set_status`, `mark_superseded` and `revise` all passed it. Converted to an allowlist |
+| 9 | Precedent routed to an unimplemented provider | Would have silently spent 1 of its 10 queries on a permanent no-op — and Precedent is the weakest retrieval in the system |
+
+### The P6 conflict: immutability versus the right to erasure
+
+The most consequential finding of the phase. A failing cascade test turned out to be a schema-level design conflict:
+
+```
+DELETE a project (user deleting their own idea) -> BLOCKED: permission denied for evidence_items
+DELETE the auth user (account deletion)         -> BLOCKED: permission denied for evidence_items
+```
+
+**A user could never delete their own project, and an account could never be deleted.** Deleting an evidence row requires a `SELECT ... FOR KEY SHARE` lock for every **NO ACTION** foreign key referencing it, and that lock needs **UPDATE** — the one privilege P6 must never grant. Three constraints were NO ACTION: `run_id`, the self-referencing `superseded_by`, and `position_deltas.new_evidence_id`.
+
+P6 was **narrowed, not weakened**. Its purpose is that *corrections cannot silently rewrite history*; erasing a whole project falsifies nothing, it withdraws the record at the owner's request. Final state, each property verified:
+
+```
+1 erasure: delete project     -> permitted  correct
+2 erasure: delete auth user   -> permitted  correct
+3 falsification: UPDATE       -> blocked    correct   (every role, superuser included)
+4 destruction: TRUNCATE       -> blocked    correct   (every role, superuser included)
+5 authenticated bare DELETE   -> blocked    correct
+```
+
+`sources` remains permanently undeletable, which is correct: PRD §14.4 makes it a shared, globally deduplicated cache storing nothing user-identifying, so there is nothing to erase.
+
+### Deviations from `docs/PRD.md`
+
+| # | Deviation | Reason |
+|---|---|---|
+| D6 | Fetch tier 3 (Playwright) absent; chain is trafilatura → Jina Reader | Spec §4. Extension point documented in the module |
+| D13 | Non-ASCII hostnames rejected outright, making IDN sources unreachable | A missed source is a documented absence; a reached metadata endpoint is a breach. The principled fix (IDNA-encode, then re-run every check on the encoded form) is recorded in `ssrf.py` |
+| D14 | `evidence_items.run_id`, `superseded_by` and `position_deltas.new_evidence_id` are now `ON DELETE CASCADE` | Without this, project and account erasure are impossible. `project_id` and `assumption_id` already cascaded; the others look like an oversight in PRD §12 |
+| D15 | P6 permits DELETE via cascade; UPDATE and TRUNCATE stay absolute | See above |
+
+### Known limitations, accepted
+
+- **DNS rebinding is out of scope for the SSRF guard** — it does not resolve DNS. Recorded in `ssrf.py`'s docstring, with the instruction that the fetch layer pin the connection to the approved IP.
+- The Market chair uses one search provider and one claim per fetched page. Documented simplifications to revisit when Precedent, which needs three providers, is built.
+
+---
+
 
 ## Phase 4 — Graph, five chairs, auth, hearing, boardroom
 
