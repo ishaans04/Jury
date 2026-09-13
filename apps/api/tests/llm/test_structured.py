@@ -1,4 +1,3 @@
-import pytest
 from pydantic import BaseModel, Field
 
 from jury.llm.structured import schema_prompt_block, structured_many, structured_report

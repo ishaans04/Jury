@@ -227,7 +227,6 @@ async def structured_report(
     report.stages.append("field_split")
     js = schema.model_json_schema()
     defs = js.get("$defs", {})
-    required = set(js.get("required", []))
     assembled: dict[str, object] = {}
     for name, spec in js.get("properties", {}).items():
         resolved, nullable = _unwrap(spec, defs)
