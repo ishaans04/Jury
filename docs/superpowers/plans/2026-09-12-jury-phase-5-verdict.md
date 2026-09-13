@@ -574,7 +574,25 @@ async def test_the_run_respects_the_llm_budget_of_120(offline):
 ```
 
 - [ ] **Step 2: Verify it fails**
-- [ ] **Step 3: Implement.** `plan_experiments` builds `assumption_for_variable` by walking the model run's parameters back to the assumption each was bound from, calls `generate_experiments`, then persists with `ExperimentRepo`. Instructions are optionally enriched by the `experiment_instructions` role (PRD §15.1: *"Filling a template, not inventing method"*) — the template text is the fallback and is never replaced by a model response that fails validation.
+- [ ] **Step 3: Implement.** `plan_experiments` builds `assumption_for_variable` by walking the model run's parameters back to the assumption each was bound from, calls `generate_experiments`, then persists with `ExperimentRepo`.
+
+**It must pass `modelled=` — this is not optional.** `generate_experiments` takes a
+`modelled: dict[str, float] | None` supplying the real thresholds for methods whose
+`MethodSpec.threshold_source` is set (`delivery_cost`, `cac`, `aov`, `churn_monthly`).
+Build it from the model run's breakpoints:
+
+```python
+modelled = {b["variable"]: b["threshold"] for b in model_run["breakpoints"]}
+drafts = generate_experiments(sensitivity, assumption_for_variable,
+                              top_k=5, modelled=modelled)
+```
+
+Without it those four experiment types are **silently skipped**, because a criterion
+with a placeholder threshold is a gate that cannot fail — unsatisfiable for the three
+positive-metric variables, trivially satisfied for `aov` — and the P9 export gate would
+pass it as structurally valid. Skipping is the honest behaviour; supplying `modelled`
+is what makes the experiments exist at all. Add a test asserting that a plan built from
+a real model run contains a `supplier_quote` experiment with a **non-zero** threshold. Instructions are optionally enriched by the `experiment_instructions` role (PRD §15.1: *"Filling a template, not inventing method"*) — the template text is the fallback and is never replaced by a model response that fails validation.
 - [ ] **Step 4: Verify it passes**
 - [ ] **Step 5: Commit** — `git commit -m "feat(graph): experiment plan node and full pipeline wiring"`
 

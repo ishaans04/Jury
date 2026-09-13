@@ -2325,7 +2325,9 @@ git commit -m "feat(engines): typed economics templates with brentq breakpoints 
 
 **Interfaces:**
 - Produces:
-  - `generate_experiments(sensitivity: list[SensitivityEntry], assumption_for_variable: dict[str, str], top_k: int = 5) -> list[ExperimentDraft]`
+  - `generate_experiments(sensitivity: list[SensitivityEntry], assumption_for_variable: dict[str, str], top_k: int = 5, modelled: dict[str, float] | None = None) -> list[ExperimentDraft]`
+    - `MethodSpec.threshold_source: str | None` names which modelled value fills the criterion threshold. Set on `delivery_cost`, `cac`, `aov`, `churn_monthly`; `None` on the three specs carrying a real self-contained threshold.
+    - When `threshold_source` is set and `modelled` lacks it, the experiment is **skipped** — never emitted with a placeholder. A `<= 0.0` criterion against a structurally positive metric is unsatisfiable, a `>= 0.0` criterion against a basket value is trivially satisfied, and the P9 export gate would pass either as structurally valid. A gate that cannot fail defeats the point of pre-registration.
   - `VARIABLE_METHODS: dict[str, MethodSpec]`
   - `evaluate_criterion(spec: CriterionSpec, result_value: float) -> bool`
   - `status_for_result(spec, result_value) -> ExperimentStatus`
