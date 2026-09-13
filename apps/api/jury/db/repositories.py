@@ -1,0 +1,418 @@
+"""The only module that writes SQL (spec §6).
+
+Every other module reaches Postgres through one of the repositories here --
+never through a raw connection of its own. That single choke point is what
+makes P6 enforceable in Python as well as in the schema: `EvidenceRepo`
+simply has no method whose name suggests mutation, so there is no call a
+caller could make, correct or mistaken, that would try to update or delete
+an evidence row. The database already denies UPDATE/DELETE/TRUNCATE to every
+role (0003_immutability.sql, 0005_evidence_no_truncate.sql) and would reject
+such an attempt at runtime with a raised trigger exception -- but "the
+database will reject it" is a worse guarantee than "the method does not
+exist," because the former still requires something to attempt the mutation
+and mishandle the resulting error. `test_evidence_repo_exposes_no_mutation_methods`
+asserts the absence directly, by introspecting the class.
+
+Exception policy (a decision this module had to make; not specified in the
+brief): repository methods do NOT blanket-catch exceptions the way
+`retrieval/fetch.py` and `retrieval/verify.py` do. Those two catch broadly
+because a single flaky provider or a single bad source must degrade one
+claim to a rejection, never crash the whole run -- degrading to less
+evidence is *correct* behaviour for a transport that is expected to be
+unreliable. A database outage is a different kind of failure: it is not
+"one provider had a hiccup," it is "the run's entire persistence layer is
+unavailable," and silently returning None/[] for that would look
+indistinguishable from an ordinary empty result or an ordinary dedup skip,
+hiding a systemic problem behind data that looks merely uneventful. So the
+only exception any repository method catches is the one the brief names
+explicitly: `insert_verified` catches `psycopg.errors.UniqueViolation`,
+because a duplicate `dedup_hash` is an expected, documented business
+outcome (P10 -- two chairs finding the same source is normal), not an
+infrastructure failure. Every other exception (a lost connection, a bad
+constraint, a pool timeout) propagates to the caller uncaught, the same way
+`jury/llm/gateway.py` lets a fully-exhausted retry chain raise rather than
+inventing an answer -- the orchestration layer above (Phase 4's chair loop)
+is where a policy for "the database is down mid-run" belongs, not a
+best-effort guess made silently in the data layer.
+
+`insert_verified` computes `dedup_hash` itself, from
+`(verified.canonical_url, verified.claim.variable, verified.claim.scope)`
+via `jury.engines.dedup.dedup_hash` -- there is no parameter a caller could
+use to supply one instead. A caller-supplied hash that disagreed with the
+row's own url/variable/scope would silently defeat P10 (a wrong hash could
+collide with an unrelated row, or fail to collide with a genuine duplicate);
+computing it from the verified claim's own fields inside the repository is
+what makes that impossible rather than merely policy.
+"""
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Json
+
+from jury.engines.dedup import dedup_hash
+from jury.retrieval.verify import VerifiedClaim
+
+
+def _row_id(row) -> str:
+    return str(row[0])
+
+
+class SourceRepo:
+    """`sources` is shared, globally-deduplicated reference data (PRD §14.4:
+    "a fetched pricing page is not private data"), not an evidence-integrity
+    boundary -- unlike `evidence_items`, updating a source row (a fresher
+    HTTP status, a filled-in title) is normal, so `upsert` is a real upsert.
+    """
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def upsert(self, canonical_url: str, domain: str, tier: int,
+                     title: str | None, http_status: int,
+                     storage_path: str | None = None) -> str:
+        """Idempotent on `canonical_url` (the table's own unique constraint).
+        A second call with the same URL returns the same id; whatever
+        metadata it carries becomes the row's current metadata (last write
+        wins) -- there is exactly one row per source, never a history of
+        them, so "current" is the only meaning `upsert` needs to have."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into sources "
+                    "(canonical_url, domain, tier, title, http_status, storage_path) "
+                    "values (%s, %s, %s, %s, %s, %s) "
+                    "on conflict (canonical_url) do update set "
+                    "domain = excluded.domain, tier = excluded.tier, "
+                    "title = excluded.title, http_status = excluded.http_status, "
+                    "storage_path = excluded.storage_path "
+                    "returning id",
+                    (canonical_url, domain, tier, title, http_status, storage_path),
+                )
+                row = await cur.fetchone()
+                return _row_id(row)
+
+
+class EvidenceRepo:
+    """Insert-only, by construction of this class's method set (P6). See the
+    module docstring for the full reasoning; do not add an update, delete,
+    upsert, save, or set_* method here -- corrections belong in a new row
+    with `superseded_by` pointing backwards at the row it replaces, exactly
+    as 0003_immutability.sql's comment describes for the schema itself.
+    """
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def insert_verified(self, project_id: str, run_id: str, assumption_id: str,
+                              source_id: str, verified: VerifiedClaim) -> str | None:
+        """Returns the new row's id, or None if `(project_id, dedup_hash)`
+        already exists (P10) -- a duplicate is a no-op, never an exception.
+
+        The insert runs inside a savepoint (`conn.transaction()`, nested
+        automatically since the connection is already mid-transaction): a
+        `UniqueViolation` aborts a plain transaction block until it is
+        rolled back, and this repository has no business rolling back
+        work a caller may have done earlier on the same connection just
+        because one insert of several collided. The savepoint confines the
+        rollback to exactly this insert.
+        """
+        claim = verified.claim
+        computed_hash = dedup_hash(verified.canonical_url, claim.variable, claim.scope)
+        try:
+            async with self._pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "insert into evidence_items "
+                            "(project_id, run_id, assumption_id, source_id, chair, "
+                            "direction, variable, value_num, value_min, value_max, unit, "
+                            "scope_geo, scope_segment, scope_tier, scope_period, "
+                            "confidence, excerpt, dedup_hash) "
+                            "values (%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s, "
+                            "%s,%s,%s,%s, %s,%s,%s) "
+                            "returning id",
+                            (project_id, run_id, assumption_id, source_id, claim.chair.value,
+                             claim.direction.value, claim.variable, claim.value_num,
+                             claim.value_min, claim.value_max, claim.unit,
+                             claim.scope.geo.value, claim.scope.segment.value,
+                             claim.scope.tier.value if claim.scope.tier else None,
+                             claim.scope.period,
+                             claim.confidence, claim.excerpt, computed_hash),
+                        )
+                        row = await cur.fetchone()
+                return _row_id(row)
+        except psycopg.errors.UniqueViolation:
+            return None
+
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from evidence_items where project_id = %s "
+                    "order by created_at", (project_id,))
+                return await cur.fetchall()
+
+
+class AssumptionRepo:
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create_many(self, project_id: str, run_id: str,
+                          assumptions: list[dict]) -> list[str]:
+        """Bulk-insert founder-origin assumptions extracted from the hearing
+        (PRD §7.2). Each dict supplies at least `class_key`, `statement`,
+        `criticality`, `uncertainty`, `falsifiability`; `asserted_variable`/
+        `asserted_value`/`asserted_unit` are optional (a founder assertion
+        that carries no number is still an assumption)."""
+        ids = []
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                for a in assumptions:
+                    await cur.execute(
+                        "insert into assumptions "
+                        "(project_id, run_id, class_key, statement, origin, "
+                        "criticality, uncertainty, falsifiability, "
+                        "asserted_variable, asserted_value, asserted_unit) "
+                        "values (%s,%s,%s,%s,'founder', %s,%s,%s, %s,%s,%s) "
+                        "returning id",
+                        (project_id, run_id, a["class_key"], a["statement"],
+                         a["criticality"], a["uncertainty"], a["falsifiability"],
+                         a.get("asserted_variable"), a.get("asserted_value"),
+                         a.get("asserted_unit")),
+                    )
+                    ids.append(_row_id(await cur.fetchone()))
+        return ids
+
+    async def create_discovered(self, project_id: str, run_id: str, chair: str,
+                                class_key: str, statement: str, criticality: str,
+                                uncertainty: str, falsifiability: str) -> str:
+        """A chair introducing an assumption the extractor missed (PRD §7.3);
+        `discovered_by` must name the chair (schema's
+        `discovered_by_matches_origin` check)."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into assumptions "
+                    "(project_id, run_id, class_key, statement, origin, discovered_by, "
+                    "criticality, uncertainty, falsifiability) "
+                    "values (%s,%s,%s,%s,'discovered',%s, %s,%s,%s) "
+                    "returning id",
+                    (project_id, run_id, class_key, statement, chair,
+                     criticality, uncertainty, falsifiability),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from assumptions where project_id = %s "
+                    "order by created_at", (project_id,))
+                return await cur.fetchall()
+
+    async def update_status_and_strength(self, assumption_id: str, status: str,
+                                         strength: float) -> None:
+        """Unlike evidence, an assumption's status/strength is a live
+        rollup recomputed as evidence arrives -- there is no immutability
+        constraint on `assumptions` in the schema, and the brief names this
+        method explicitly, so a direct UPDATE is the intended shape here."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "update assumptions set status = %s, strength = %s where id = %s",
+                    (status, strength, assumption_id),
+                )
+
+
+class ConflictRepo:
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, project_id: str, run_id: str, assumption_id: str,
+                     kind: str, left_ref: dict, right_ref: dict | None,
+                     rule: str, severity: str) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into conflicts "
+                    "(project_id, run_id, assumption_id, kind, left_ref, right_ref, "
+                    "rule, severity) "
+                    "values (%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+                    (project_id, run_id, assumption_id, kind,
+                     Json(left_ref),
+                     Json(right_ref) if right_ref is not None else None,
+                     rule, severity),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def add_position_delta(self, conflict_id: str, chair: str, before: str,
+                                 after: str, reason: str,
+                                 new_evidence_id: str | None = None) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into position_deltas "
+                    "(conflict_id, chair, before, after, reason, new_evidence_id) "
+                    "values (%s,%s,%s,%s,%s,%s) returning id",
+                    (conflict_id, chair, before, after, reason, new_evidence_id),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def resolve(self, conflict_id: str, status: str, resolution: str) -> None:
+        """`conflicts.status` is designed to transition (open -> resolved /
+        conceded / unresolvable, PRD §12); no P6-style immutability applies
+        to this table, so a direct UPDATE is correct here."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "update conflicts set status = %s, resolution = %s where id = %s",
+                    (status, resolution, conflict_id),
+                )
+
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from conflicts where project_id = %s "
+                    "order by created_at", (project_id,))
+                return await cur.fetchall()
+
+
+class ModelRunRepo:
+    """`model_runs` is an append-only log of computed economics scenarios;
+    nothing in PRD §16.5 revises a scenario in place, so this repo is
+    read/insert only, the same shape as `EvidenceRepo` but without the
+    dedup concern (there is no cross-run identity to collide on)."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, project_id: str, run_id: str, template_key: str,
+                     parameters: dict, outputs: dict, breakpoints: dict,
+                     sensitivity: dict, viable: bool) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into model_runs "
+                    "(project_id, run_id, template_key, parameters, outputs, "
+                    "breakpoints, sensitivity, viable) "
+                    "values (%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+                    (project_id, run_id, template_key,
+                     Json(parameters),
+                     Json(outputs),
+                     Json(breakpoints),
+                     Json(sensitivity), viable),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from model_runs where project_id = %s "
+                    "order by created_at", (project_id,))
+                return await cur.fetchall()
+
+
+class ExperimentRepo:
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, project_id: str, assumption_id: str,
+                     target_variable: str | None, method: str, instructions: str,
+                     kill_criterion: str, criterion_spec: dict,
+                     est_cost: float | None, est_days: int | None,
+                     priority: int) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into experiments "
+                    "(project_id, assumption_id, target_variable, method, instructions, "
+                    "kill_criterion, criterion_spec, est_cost, est_days, priority) "
+                    "values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+                    (project_id, assumption_id, target_variable, method, instructions,
+                     kill_criterion, Json(criterion_spec),
+                     est_cost, est_days, priority),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from experiments where project_id = %s "
+                    "order by priority", (project_id,))
+                return await cur.fetchall()
+
+    async def log_result(self, experiment_id: str, status: str,
+                         result_value: float | None, result_notes: str | None) -> None:
+        """An experiment's status/result is filled in after it actually runs
+        (PRD §16.6); like assumptions and conflicts, this is a live-status
+        table, not an insert-only ledger, so UPDATE is correct here."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "update experiments set status = %s, result_value = %s, "
+                    "result_notes = %s, logged_at = now() where id = %s",
+                    (status, result_value, result_notes, experiment_id),
+                )
+
+
+class VerdictRepo:
+    """`verdicts` is an append-only decision history: PRD §12 gives it no
+    status column and no update path, so this repo is insert/read only."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, run_id: str, project_id: str, decision: str,
+                     evidence_confidence: float, components: dict,
+                     gate_triggered: str | None, friction: dict, rationale: str) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into verdicts "
+                    "(run_id, project_id, decision, evidence_confidence, components, "
+                    "gate_triggered, friction, rationale) "
+                    "values (%s,%s,%s,%s,%s,%s,%s,%s) returning id",
+                    (run_id, project_id, decision, evidence_confidence,
+                     Json(components), gate_triggered,
+                     Json(friction), rationale),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from verdicts where project_id = %s "
+                    "order by created_at", (project_id,))
+                return await cur.fetchall()
+
+
+class LedgerVersionRepo:
+    """`ledger_versions` is the append-only snapshot/diff history behind
+    return-visit runs (PRD §9); `unique (project_id, version)` is the
+    schema's own guarantee that a version number is never reused."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, project_id: str, run_id: str, version: int,
+                     snapshot: dict, diff: dict) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into ledger_versions (project_id, run_id, version, snapshot, diff) "
+                    "values (%s,%s,%s,%s,%s) returning id",
+                    (project_id, run_id, version, Json(snapshot),
+                     Json(diff)),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def latest_for_project(self, project_id: str) -> dict | None:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from ledger_versions where project_id = %s "
+                    "order by version desc limit 1", (project_id,))
+                return await cur.fetchone()
