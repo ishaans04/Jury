@@ -73,7 +73,7 @@ def traced(node: str):
             started = time.perf_counter()
             try:
                 result = await fn(*args, trace=trace, **kwargs)
-            except Exception as err:                      # noqa: BLE001
+            except Exception as err:
                 await trace.emit(
                     node=node, event="error",
                     detail={"error": f"{type(err).__name__}: {err}"},
