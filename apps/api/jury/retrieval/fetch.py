@@ -19,9 +19,14 @@ and neither of those tests mocks the Jina route, so a literal len(text) < 200
 check would make both raise an unmocked-request error. The signal that
 actually discriminates the brief's "retry" fixture (an empty `<div id="root">`
 shell, 0 characters recovered by either extractor) from its "don't retry"
-fixtures (short but real prose, 31-37 characters) is emptiness, not a length
-threshold. This module retries tier 2 only when extraction recovered no text
-at all, and documents the discrepancy here rather than silently matching the
+fixtures (short but real prose, 31-37 characters) is a small nonzero floor
+(`_THIN_TEXT_FLOOR`, chosen at 20 characters -- comfortably below the 31/37
+character fixtures, comfortably above "true zero"). A pure emptiness check
+would also satisfy every given fixture, but a small floor additionally
+catches the class of page that renders a cookie-banner or an "enable
+JavaScript to continue" placeholder as its only server-rendered text -- a few
+words, technically nonzero, still not a page worth treating as fetched. This
+module documents the discrepancy here rather than silently matching the
 letter of "~200 characters" against tests that contradict it.
 
 Tier 3 (explicitly cut, spec §4): a headless-browser render (Playwright) for
@@ -40,21 +45,18 @@ followed — a plain per-URL SSRF check that only inspects the request URL is
 exactly the check a redirect trivially bypasses (Batch K's guard also does
 not resolve DNS, so this is the layer that would otherwise be the gap).
 Fetches are deduplicated in Redis (or the in-memory KV fallback) by
-canonical URL for 24 hours, including rejected (non-2xx) outcomes: a source
-that paywalled or 404'd a minute ago is not meaningfully more fetchable now,
-and re-hitting it inside the same window only spends budget for no new
-evidence — see the module's test suite and the batch report for the fuller
-reasoning.
-
-The cache is an optimisation, never load-bearing for correctness: a KV read
-or write failure degrades to an uncached live fetch rather than propagating,
-the same way a non-2xx response degrades to a rejected `FetchResult` rather
-than an exception. httpx also has its own sharp edge here: it builds the
-redirect request eagerly (to populate `response.next_request`/`.history`)
-even with `follow_redirects=False`, so a `Location` header that doesn't parse
-as a URL raises `httpx.InvalidURL` -- which is *not* an `httpx.HTTPError`
-subclass -- before our own per-hop SSRF recheck ever runs. That is caught
-explicitly below rather than allowed to crash the fetch.
+canonical URL for 24 hours -- but only outcomes that are *not* transient are
+cached that long. A hard 4xx (403 paywalled, 404 gone) is cached for the full
+window: a source that rejected us a minute ago is not meaningfully more
+fetchable now, and re-hitting it inside the same window only spends budget
+for no new evidence. A 429 or 5xx is never cached at all, because it is not a
+statement about the source -- it is a statement about *this attempt*, and
+recording it for a day would silently turn a momentary rate-limit or outage
+into a day-long absence of evidence in the ledger, which is exactly the
+failure PRD §18 exists to prevent. The cache itself is also never
+load-bearing for correctness: a KV read or write failure degrades to an
+uncached live fetch rather than propagating, the same way a fetch failure
+degrades to a rejected source rather than a crash.
 """
 import json
 from urllib.parse import urljoin
@@ -74,10 +76,20 @@ _DEDUP_TTL_S = 86_400
 _MAX_REDIRECTS = 5
 _TOO_MANY_REDIRECTS_STATUS = 310
 _REDIRECT_BLOCKED_STATUS = 400
+_THIN_TEXT_FLOOR = 20
 
 
 def _cache_key(canonical_url: str) -> str:
     return f"fetch:{canonical_url}"
+
+
+def _is_cacheable(status: int) -> bool:
+    """2xx and "permanent-ish" 4xx are cached for the full dedup window. 429
+    (rate limit) and 5xx (server-side outage) describe this attempt, not the
+    source, and are never cached -- see the module docstring."""
+    if status == 429 or 500 <= status < 600:
+        return False
+    return True
 
 
 def _serialize(result: FetchResult) -> str:
@@ -112,7 +124,8 @@ class LiveFetchClient:
             return _deserialize(cached)
 
         result = await self._fetch_live(url)
-        await self._kv_set(_cache_key(canonical), _serialize(result), _DEDUP_TTL_S)
+        if _is_cacheable(result.status):
+            await self._kv_set(_cache_key(canonical), _serialize(result), _DEDUP_TTL_S)
         return result
 
     async def _kv_get(self, key: str) -> str | None:
@@ -138,11 +151,17 @@ class LiveFetchClient:
                 try:
                     response = await http.get(current)
                 except httpx.InvalidURL:
-                    # See the module docstring: httpx raises this while
-                    # eagerly building a redirect request, before our own
-                    # per-hop SSRF recheck below ever gets a chance to run.
-                    # Treat a malformed redirect target exactly like one our
-                    # guard refused to follow.
+                    # httpx builds the redirect request eagerly to populate
+                    # `response.next_request`/`history`, even with
+                    # follow_redirects=False, so a `Location` header that
+                    # doesn't parse as a URL (e.g. `javascript:alert(1)`, or
+                    # anything else a hostile or merely misconfigured origin
+                    # sends) raises here -- before our own per-hop SSRF
+                    # recheck ever runs. Treat it exactly like a redirect our
+                    # guard refused to follow: a malformed redirect target is
+                    # never something we can hand to that recheck at all, and
+                    # httpx.InvalidURL is NOT an httpx.HTTPError subclass, so
+                    # it needs its own branch.
                     return FetchResult(url=current, status=_REDIRECT_BLOCKED_STATUS, text="")
                 except httpx.HTTPError:
                     return FetchResult(url=current, status=502, text="")
@@ -165,7 +184,7 @@ class LiveFetchClient:
                     return FetchResult(url=current, status=response.status_code, text="")
 
                 text = extract_text(response.text, current)
-                if not text.strip():
+                if len(text.strip()) < _THIN_TEXT_FLOOR:
                     reader_text = await self._fetch_via_reader(current, http)
                     if reader_text:
                         text = reader_text
@@ -180,10 +199,11 @@ class LiveFetchClient:
         try:
             response = await http.get(f"{JINA_PREFIX}{url}")
         except (httpx.HTTPError, httpx.InvalidURL):
-            # Same blind spot as the tier-1 loop above: httpx.InvalidURL is
-            # not an httpx.HTTPError subclass. Here it just means tier 2
-            # didn't pan out either; the caller falls back to whatever
-            # tier-1 text it already has.
+            # Same blind spot as the tier-1 loop above: httpx can raise
+            # InvalidURL while eagerly building a redirect request, and that
+            # is not an HTTPError subclass. Here it just means "tier 2 didn't
+            # pan out either" -- the caller falls back to whatever tier-1
+            # text it already has.
             return None
         if not (200 <= response.status_code < 300):
             return None
