@@ -1,0 +1,25 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
+
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    pool: "forks",
+    singleFork: true,
+    environment: "jsdom",
+    setupFiles: ["./tests/setup.ts"],
+    globals: true,
+    css: false,
+    exclude: ["**/node_modules/**", "**/e2e/**", "**/.next/**"],
+  },
+  resolve: {
+    alias: {
+      "@": dirname,
+    },
+  },
+});
