@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": \"44444444-4444-4444-4444-444444444444\", \"new_assumption\": null, \"direction\": \"refutes\", \"variable\": \"aws_cost_estimate\", \"value_num\": 10000, \"value_min\": null, \"value_max\": null, \"unit\": \"USD_per_month\", \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://vendor-docs.test/ungrounded-aws-cost\", \"source_tier\": 2, \"excerpt\": \"AWS costs will probably balloon to a large amount at scale.\", \"chair\": \"dependencies\"}"
+}

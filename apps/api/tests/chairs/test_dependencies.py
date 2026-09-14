@@ -158,6 +158,38 @@ async def test_a_dependency_claim_must_carry_a_variable_or_unit(pool):
     assert result.rejected
 
 
+# ── grounding: a citable property must be the figure the page states ────
+
+async def test_a_dependency_claim_with_an_ungrounded_value_is_rejected(pool):
+    """The structural check alone (variable + value_num/value_min/unit
+    populated) is not enough: a claim naming a real-looking dependency and
+    property whose numeric value never actually appears on the cited page
+    is still opinion dressed in structured fields, and must be rejected."""
+    seed = await _seed(pool)
+    pitch = f"{PITCH_MAIN} [ungrounded]"
+    ctx = _make_ctx(pool, seed, pitch=pitch)
+    result = await dependencies.investigate(ctx)
+
+    assert result.inserted == []
+    assert result.rejected
+    assert await count_evidence(pool, seed["project_id"]) == 0
+
+
+async def test_an_opinion_with_an_unrelated_number_is_still_rejected(pool):
+    """Grounding checks the CLAIM's own value against the excerpt, not
+    merely 'is there some digit anywhere in the excerpt' -- an excerpt that
+    genuinely contains numbers (a duration, a year) must not ground an
+    unrelated value_num the extractor attached to it."""
+    seed = await _seed(pool)
+    pitch = f"{PITCH_MAIN} [ungrounded-unrelated-number]"
+    ctx = _make_ctx(pool, seed, pitch=pitch)
+    result = await dependencies.investigate(ctx)
+
+    assert result.inserted == []
+    assert result.rejected
+    assert await count_evidence(pool, seed["project_id"]) == 0
+
+
 async def test_the_chair_emits_no_prose_only_typed_records(pool):
     seed = await _seed(pool)
     pitch = f"{PITCH_MAIN} [citable: api_rate_limit]"

@@ -9,43 +9,96 @@ persona wearing a new badge. `_dependency_guard` below is the hard rule
 that keeps it out.
 
 **How the guard actually decides (Task 4.2 asks this to be stated
-plainly):** it is a purely STRUCTURAL check on the extracted `ClaimRecord`
--- `variable` must be set AND at least one of `value_num` / `value_min` /
-`unit` must be set -- run as `base.run_chair`'s `claim_guard` hook, before
-`verify_claim`. It is deliberately NOT a lexical/keyword check on the
-`excerpt` text (e.g. "does the excerpt contain a capitalised word / a
-vendor name"). Two reasons, not one:
+plainly):** it is two checks, both required, run as `base.run_chair`'s
+`claim_guard` hook -- before `verify_claim` -- on the extracted
+`ClaimRecord`:
 
-  1. It would reject the brief's own canonical accepted example. PRD §6.2's
+  1. **Structural**: `variable` must be set AND at least one of
+     `value_num` / `value_min` / `unit` must be set. It is deliberately NOT
+     a lexical/keyword check on the `excerpt` text (e.g. "does the excerpt
+     contain a capitalised word / a vendor name"), for two reasons. First,
+     it would reject the brief's own canonical accepted example: PRD §6.2's
      worked "published per-call price" case is exactly
      `("stripe_api_price", "Standard pricing is 2.9% plus 30 cents per
      charge.")` -- an excerpt that names no vendor at all in its own text;
      the dependency is named by the claim's structured `variable` field
-     ("stripe_api_price"), not by a proper noun inside the excerpt. A
-     literal "the excerpt must name an entity" regex would reject this
-     true positive.
-  2. It is the wrong direction of gameability. A lexical entity-in-excerpt
-     check can be satisfied by an opinion that happens to mention a vendor
-     name ("Stripe will be hard to integrate.") while carrying no citable
-     property at all -- exactly the failure mode this guard exists to
-     close. The structural check cannot be satisfied that way: an opinion
-     sentence has nowhere to put a `variable` name or a `value_num`/`unit`
-     without the extractor inventing a fake one, and a fabricated numeric
-     value is a `verify_claim` problem (excerpt-verbatim, source-fetched)
-     the pipeline already polices independently, downstream of this guard.
+     ("stripe_api_price"), not by a proper noun inside the excerpt. Second,
+     a lexical entity-in-excerpt check is the wrong direction of
+     gameability: it can be satisfied by an opinion that happens to mention
+     a vendor name ("Stripe will be hard to integrate.") while carrying no
+     citable property at all -- exactly the failure mode this guard exists
+     to close.
+  2. **Grounding**: whichever of `value_num` / `value_min` / `value_max`
+     ARE populated must each have their digits actually present in the
+     claim's own `excerpt` text (see `_grounded`, tolerant of thousands
+     separators and decimal points, via a plain digit-substring check --
+     deliberately not a currency/unit parser). A structural pass alone is
+     NOT enough: nothing before this fix stopped a claim like
+     `variable="aws_cost_estimate", value_num=10000, unit="USD_per_month"`
+     with `excerpt="AWS costs will probably balloon to over 10000 a month
+     at scale."` -- an opinion, verbatim on the page, dressed in structured
+     fields -- from passing both this guard and `verify_claim` (which only
+     checks that the *excerpt string* appears on the fetched page; it never
+     checks that a claim's numeric fields are actually the number the
+     excerpt is quoting). This chair is precisely the one PRD §6.2 warns
+     "drifts into opinion if unconstrained," so grounding closes that gap
+     here rather than relying on the shared gate (`verify.py`) to do it --
+     `verify_claim` is left unchanged; this check is Dependencies-specific.
+     Requiring the extractor to fabricate a numeric field that happens to
+     collide with an unrelated number already on the page is a narrower
+     attack surface than free-form prompt injection, so this is
+     defense-in-depth on top of the prompt's own instructions, not a
+     replacement for them.
 
 So "a specific external dependency with a citable property" is enforced as
-"a variable name plus a value or unit" -- a property, not a sentence -- and
+"a variable name plus a value or unit, where any value present is the
+number the excerpt actually states" -- a property, not a sentence -- and
 nothing more. See the batch report for the full reasoning and the tension
-this creates with PRD §6.2's own phrasing ("names a domain-bearing
-entity"), which is not fully separable from the structural check without
-rejecting the brief's own accepted example.
+between the structural check and PRD §6.2's own phrasing ("names a
+domain-bearing entity"), which is not fully separable from the structural
+check without rejecting the brief's own accepted example.
 """
+import re
+
 from jury.chairs.base import ChairContext, ChairResult, run_chair
 from jury.retrieval.budgets import CHAIR_BUDGETS, CHAIR_PROVIDERS
 from jury.schemas.claim import ClaimRecord
 from jury.schemas.enums import Chair
 from jury.transport.protocols import SearchHit
+
+_NUM_RUN = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _digits_only(s: str) -> str:
+    return re.sub(r"\D", "", s)
+
+
+def _num_to_digits(value: float) -> str:
+    """`value`, rendered the way it would plausibly appear on a page, then
+    reduced to its bare digits. `100.0` renders as "100" (not "100.0",
+    whose spurious ".0" would make a perfectly grounded whole number look
+    ungrounded), while `2.9` keeps its fractional digit."""
+    text = str(int(value)) if value == int(value) else repr(value)
+    return _digits_only(text)
+
+
+def _grounded(value: float, excerpt: str) -> bool:
+    """True iff `value`'s own digit-run is one of the numbers the excerpt
+    actually states -- not merely "some digit of it appears somewhere".
+    Thousands separators are stripped before splitting the excerpt into
+    number tokens (so "10,000" reads as one token, "10000") and each
+    token's own non-digit characters (a decimal point) are then stripped
+    before comparison. Deliberately not a currency/unit parser -- a
+    digit-substring check after stripping separators is the brief's own
+    "keep it simple" instruction."""
+    value_digits = _num_to_digits(value)
+    if not value_digits:
+        return False
+    excerpt_clean = excerpt.replace(",", "")
+    for run in _NUM_RUN.findall(excerpt_clean):
+        if value_digits in _digits_only(run):
+            return True
+    return False
 
 _PROVIDER = CHAIR_PROVIDERS[Chair.DEPENDENCIES][0]     # "brave" -- only entry.
 _LLM_ROLE = "dependencies_extract"
@@ -58,12 +111,21 @@ _BASE_QUERY_SUFFIXES = (
 
 
 def _dependency_guard(claim: ClaimRecord) -> str | None:
-    """PRD §6.2's hard rule, enforced structurally. See module docstring."""
+    """PRD §6.2's hard rule: structural, then grounded. See module docstring."""
     if not claim.variable:
         return "no specific external dependency named (variable is null)"
     if claim.value_num is None and claim.value_min is None and claim.unit is None:
         return ("no citable property on the named dependency "
                 "(no value_num/value_min/unit) -- an opinion, not a property")
+
+    for field_name, value in (("value_num", claim.value_num),
+                              ("value_min", claim.value_min),
+                              ("value_max", claim.value_max)):
+        if value is not None and not _grounded(value, claim.excerpt):
+            return (f"{field_name}={value!r} is not grounded in the excerpt's "
+                    "own text -- a citable property must be a figure the "
+                    "page actually states, not a structured field pinned "
+                    "onto an opinion")
     return None
 
 
