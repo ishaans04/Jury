@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 
 from jury.api.deps import get_current_user
-from jury.api.routers import experiments, health, projects, runs, stream
+from jury.api.routers import experiments, health, projects, runs, stream, versions
 from jury.db.pool import close_pool, open_pool
 from jury.settings import settings
 
@@ -35,3 +35,4 @@ app.include_router(projects.router, dependencies=[Depends(get_current_user)])
 app.include_router(runs.router, dependencies=[Depends(get_current_user)])
 app.include_router(experiments.router, dependencies=[Depends(get_current_user)])
 app.include_router(stream.router, dependencies=[Depends(get_current_user)])
+app.include_router(versions.router, dependencies=[Depends(get_current_user)])

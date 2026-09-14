@@ -22,6 +22,11 @@ DIFF_ORDER = (
 )
 _COMPONENTS = ("coverage", "mean_strength", "contradiction", "open_critical")
 
+# Task 6.5: the versions/diff read API validates every entry's `type` against
+# this set (`DIFF_TYPES`) rather than hand-copying `DIFF_ORDER` into the API
+# layer -- one source of truth for "what a diff entry type may be."
+DIFF_TYPES = frozenset(DIFF_ORDER)
+
 
 @dataclass(frozen=True, slots=True)
 class DiffEntry:

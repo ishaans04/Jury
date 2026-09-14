@@ -694,6 +694,28 @@ class LedgerVersionRepo:
                     "order by version desc limit 1", (project_id,))
                 return await cur.fetchone()
 
+    async def list_for_project(self, project_id: str) -> list[dict]:
+        """Task 6.5: `GET /projects/{id}/versions` -- newest first, so the
+        return-visit screen's version picker shows the most recent snapshot
+        without the caller having to reverse anything."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from ledger_versions where project_id = %s "
+                    "order by version desc", (project_id,))
+                return await cur.fetchall()
+
+    async def get_by_version(self, project_id: str, version: int) -> dict | None:
+        """Task 6.5: one version's own row (snapshot + diff) by its dense,
+        human-facing version number -- not its uuid, since the return-visit
+        URL names a version number (`/versions/{v}/diff`), never an id."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from ledger_versions where project_id = %s and version = %s",
+                    (project_id, version))
+                return await cur.fetchone()
+
     async def create_next_version(self, project_id: str, run_id: str, snapshot: dict,
                                   diff: list) -> int:
         """Task 6.2: atomically computes and inserts the next dense,
