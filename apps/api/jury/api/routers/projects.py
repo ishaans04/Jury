@@ -20,6 +20,7 @@ from jury.transport.factory import build_transports
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 _MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
+_ARTIFACT_CHUNK_BYTES = 64 * 1024
 _ALLOWED_ARTIFACT_MIME = frozenset({
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -103,11 +104,17 @@ async def upload_artifact(project_id: str, file: UploadFile = File(...),
     if file.content_type not in _ALLOWED_ARTIFACT_MIME:
         raise HTTPException(status_code=415, detail=f"unsupported media type {file.content_type!r}")
 
-    content = await file.read()
-    if len(content) > _MAX_ARTIFACT_BYTES:
-        raise HTTPException(status_code=413, detail="artifact exceeds the 10 MB limit")
+    # Read in bounded chunks and abort the moment the cap is exceeded, so a
+    # hostile multi-hundred-MB upload never buffers into memory. Only the size
+    # is stored, so chunks are discarded as they are counted -- peak memory is
+    # one chunk, not the whole body.
+    size = 0
+    while chunk := await file.read(_ARTIFACT_CHUNK_BYTES):
+        size += len(chunk)
+        if size > _MAX_ARTIFACT_BYTES:
+            raise HTTPException(status_code=413, detail="artifact exceeds the 10 MB limit")
 
     await PitchRepo(pool).add_artifact(project_id, {
-        "filename": file.filename, "content_type": file.content_type, "size": len(content),
+        "filename": file.filename, "content_type": file.content_type, "size": size,
     })
-    return {"filename": file.filename, "size": len(content)}
+    return {"filename": file.filename, "size": size}
