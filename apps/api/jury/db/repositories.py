@@ -188,6 +188,21 @@ class EvidenceRepo:
                     "order by e.created_at", (project_id, run_id))
                 return await cur.fetchall()
 
+    async def list_for_project_with_tier(self, project_id: str) -> list[dict]:
+        """Task 6.1: the ledger snapshot's `evidence_counts` is cumulative
+        across a project's whole history, not just the run that just
+        finished -- a return-visit run must not forget evidence a prior run
+        already gathered. Same `sources` join as `list_for_conflict_engine`
+        for `tier`, just scoped to the whole project instead of one run."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select e.*, s.tier as source_tier from evidence_items e "
+                    "join sources s on s.id = e.source_id "
+                    "where e.project_id = %s "
+                    "order by e.created_at", (project_id,))
+                return await cur.fetchall()
+
 
 class AssumptionRepo:
     def __init__(self, pool) -> None:

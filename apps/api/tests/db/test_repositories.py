@@ -95,9 +95,11 @@ def test_evidence_repo_exposes_no_mutation_methods():
     # Task 5.2 added `get` -- a single-row read (needed to load a conflict's
     # evidence-type side by id for cross-examination), not a mutation; P6's
     # allowlist is about the absence of update/delete/upsert-shaped methods,
-    # not the absence of reads.
+    # not the absence of reads. Task 6.1 added `list_for_project_with_tier`
+    # -- the ledger snapshot's project-wide (not run-scoped) tier-joined read.
     assert public == {"insert_verified", "list_for_project",
-                      "list_for_conflict_engine", "get"}, public
+                      "list_for_conflict_engine", "get",
+                      "list_for_project_with_tier"}, public
 
 
 # ── EvidenceRepo.insert_verified ────────────────────────────────────────
