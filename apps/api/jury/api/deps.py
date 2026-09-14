@@ -12,6 +12,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from jury.db.pool import get_pool, user_scoped_connection
 from jury.settings import Settings, settings
+from jury.transport.factory import build_transports
+from jury.transport.protocols import Transports
 
 _ALGORITHM = "HS256"
 _AUDIENCE = "authenticated"
@@ -64,6 +66,17 @@ async def get_current_user(
     if not sub:
         raise HTTPException(status_code=401, detail="token carries no subject")
     return CurrentUser(id=str(sub), claims=claims)
+
+
+def get_transports(app_settings: Settings = Depends(get_settings)) -> Transports:
+    """Task 6.4: a dependency (rather than every route calling
+    `build_transports` inline, the way `jury.api.routers.runs` does for its
+    background-task path) so a test can override this one seam
+    (`app.dependency_overrides[get_transports] = ...`) with counting fakes
+    and assert on call counts -- the affected-only re-run's own tests need
+    to prove zero new `transports.search` calls happen, which a fresh
+    `FixtureSearchClient()` built inline could never let a test observe."""
+    return build_transports(app_settings)
 
 
 async def get_user_pool(

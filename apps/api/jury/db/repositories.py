@@ -610,6 +610,16 @@ class ExperimentRepo:
                     "order by priority", (project_id,))
                 return await cur.fetchall()
 
+    async def get(self, experiment_id: str) -> dict | None:
+        """Task 6.4: `POST /experiments/{id}/result` needs one experiment's
+        own row (its `criterion_spec`, `assumption_id`, `project_id`,
+        current `result_value`) by id."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from experiments where id = %s", (experiment_id,))
+                return await cur.fetchone()
+
     async def log_result(self, experiment_id: str, status: str,
                          result_value: float | None, result_notes: str | None) -> None:
         """An experiment's status/result is filled in after it actually runs
