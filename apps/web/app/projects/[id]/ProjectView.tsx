@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+import { createClient } from "@/lib/supabase/client";
 import { api, type ProjectOut, type RunOut } from "@/lib/api";
 import type { Archetype, CoverageGap, HearingAssumption } from "@/lib/types";
 import { Hearing } from "@/components/hearing/Hearing";
+import { Boardroom } from "@/components/boardroom/Boardroom";
 
 interface ProjectViewProps {
   project: ProjectOut;
@@ -114,11 +116,8 @@ export function ProjectView({ project, initialRun, accessToken }: ProjectViewPro
     );
   }
 
-  // Task 4.6 wires the live boardroom in here for every post-hearing
-  // status (investigating/cross_exam/deciding/complete/failed).
-  return (
-    <p className="py-12 text-center text-sm text-slate-500">
-      Investigation in progress (status: {run.status}).
-    </p>
-  );
+  // Every post-hearing status (investigating/cross_exam/deciding/complete/
+  // failed) renders the live boardroom — it has no separate "done" view
+  // because the ledger rows it already wrote simply stop growing.
+  return <Boardroom supabase={createClient()} runId={run.id} />;
 }
