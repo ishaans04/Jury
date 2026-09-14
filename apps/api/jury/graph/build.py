@@ -1,9 +1,16 @@
-"""Graph assembly. Task 4.3. PRD §7 / §10.
+"""Graph assembly. Task 4.3, extended by Task 5.5. PRD §7 / §10.
 
-Topology this batch builds (Phase 5 extends past `reconcile`):
+Full topology (Phase 5 batch T wires everything past `reconcile`):
 
     archetype -> extract -> coverage -> [interrupt: hearing]
-      -> Send fan-out x5 (chair) -> reconcile -> END
+      -> Send fan-out x5 (chair) -> reconcile
+      -> [conditional: route_after_reconcile] -> cross_exam? -> economics
+      -> jury -> experiments -> END
+
+`route_after_reconcile` (jury/graph/edges.py) sends the run to `cross_exam`
+only when reconcile found at least one open, triggering conflict; otherwise
+it skips straight to `economics`. The version node (ledger snapshot/diff)
+is Phase 6 -- `experiments` is the last node for now.
 
 A Postgres-backed checkpointer (`AsyncPostgresSaver`) is what makes the
 hearing's `interrupt()` durable across a crashed instance: the graph's state
@@ -45,11 +52,20 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
+from jury.db.repositories import (
+    AssumptionRepo, ConflictRepo, EvidenceRepo, ExperimentRepo, ModelRunRepo, SourceRepo,
+    VerdictRepo,
+)
+from jury.graph.edges import route_after_reconcile
 from jury.graph.nodes.archetype import detect_archetype
 from jury.graph.nodes.coverage import coverage_gaps
+from jury.graph.nodes.cross_exam import CrossExamRepos, cross_examine
+from jury.graph.nodes.economics import EconomicsRepos, run_economics
+from jury.graph.nodes.experiments import ExperimentsRepos, plan_experiments
 from jury.graph.nodes.extract import extract_assumptions
 from jury.graph.nodes.hearing import run_hearing
 from jury.graph.nodes.investigate import dispatch_chairs, run_chair_node
+from jury.graph.nodes.jury import JuryRepos, rule as run_jury
 from jury.graph.nodes.reconcile import run_reconcile
 from jury.graph.state import RunState
 from jury.settings import Settings, settings as _default_settings
@@ -99,6 +115,29 @@ async def build_graph(transports: Transports, pool, classes: list[tuple[str, flo
         return await run_reconcile(state, pool=pool, transports=transports, classes=classes,
                                    trace=_trace(state))
 
+    async def cross_exam_node(state: RunState) -> dict:
+        repos = CrossExamRepos(conflict=ConflictRepo(pool), evidence=EvidenceRepo(pool),
+                               source=SourceRepo(pool), assumption=AssumptionRepo(pool))
+        return await cross_examine(state, transports=transports, repos=repos,
+                                   trace=_trace(state))
+
+    async def economics_node(state: RunState) -> dict:
+        repos = EconomicsRepos(evidence=EvidenceRepo(pool), assumption=AssumptionRepo(pool),
+                               model_run=ModelRunRepo(pool))
+        return await run_economics(state, repos=repos, transports=transports,
+                                   trace=_trace(state))
+
+    async def jury_node(state: RunState) -> dict:
+        repos = JuryRepos(assumption=AssumptionRepo(pool), evidence=EvidenceRepo(pool),
+                          conflict=ConflictRepo(pool), verdict=VerdictRepo(pool),
+                          classes=classes)
+        return await run_jury(state, repos=repos, transports=transports, trace=_trace(state))
+
+    async def experiments_node(state: RunState) -> dict:
+        repos = ExperimentsRepos(experiment=ExperimentRepo(pool))
+        return await plan_experiments(state, repos=repos, transports=transports,
+                                      trace=_trace(state))
+
     builder = StateGraph(RunState)
     builder.add_node("archetype", archetype_node)
     builder.add_node("extract", extract_node)
@@ -106,6 +145,10 @@ async def build_graph(transports: Transports, pool, classes: list[tuple[str, flo
     builder.add_node("hearing", hearing_node)
     builder.add_node("chair", chair_node)
     builder.add_node("reconcile", reconcile_node)
+    builder.add_node("cross_exam", cross_exam_node)
+    builder.add_node("economics", economics_node)
+    builder.add_node("jury", jury_node)
+    builder.add_node("experiments", experiments_node)
 
     builder.add_edge(START, "archetype")
     builder.add_edge("archetype", "extract")
@@ -113,7 +156,15 @@ async def build_graph(transports: Transports, pool, classes: list[tuple[str, flo
     builder.add_edge("coverage", "hearing")
     builder.add_conditional_edges("hearing", dispatch_chairs, ["chair"])
     builder.add_edge("chair", "reconcile")
-    builder.add_edge("reconcile", END)
+    # Task 5.1/5.5: debate only where a genuine, triggering conflict exists
+    # (jury.graph.edges.route_after_reconcile) -- otherwise straight to
+    # economics. The version node is Phase 6; END after experiments for now.
+    builder.add_conditional_edges("reconcile", route_after_reconcile,
+                                  ["cross_exam", "economics"])
+    builder.add_edge("cross_exam", "economics")
+    builder.add_edge("economics", "jury")
+    builder.add_edge("jury", "experiments")
+    builder.add_edge("experiments", END)
 
     return builder.compile(checkpointer=checkpointer)
 
