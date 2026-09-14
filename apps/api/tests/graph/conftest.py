@@ -15,7 +15,9 @@ with an explicit `DELETE` instead of a rollback.
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 
+import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
@@ -31,6 +33,31 @@ def event_loop_policy():
     if sys.platform == "win32":
         return asyncio.WindowsSelectorEventLoopPolicy()
     return asyncio.get_event_loop_policy()
+
+
+class _RollbackPool:
+    """Task 5.2: same test double as tests/chairs/conftest.py's -- one held
+    connection, one outer transaction, rolled back at teardown. Unlike
+    `real_pool` above, `test_cross_exam.py` needs neither genuine concurrency
+    nor cross-process checkpoint visibility, so the cheaper single-connection
+    double is used instead of standing up another real, committed pool."""
+
+    def __init__(self, conn: psycopg.AsyncConnection) -> None:
+        self._conn = conn
+
+    @asynccontextmanager
+    async def connection(self):
+        yield self._conn
+
+
+@pytest.fixture
+async def pool():
+    conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+    try:
+        yield _RollbackPool(conn)
+    finally:
+        await conn.rollback()
+        await conn.close()
 
 
 @pytest.fixture

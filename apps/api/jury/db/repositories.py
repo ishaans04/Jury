@@ -159,6 +159,19 @@ class EvidenceRepo:
                     "order by created_at", (project_id,))
                 return await cur.fetchall()
 
+    async def get(self, evidence_id: str) -> dict | None:
+        """Task 5.2: cross-examination needs one evidence row's source url and
+        tier by id (a conflict's `left_ref`/`right_ref` names an evidence id
+        directly) -- the same `sources` join as `list_for_conflict_engine`,
+        just scoped to one row instead of a whole run."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select e.*, s.tier as source_tier, s.canonical_url as source_url "
+                    "from evidence_items e join sources s on s.id = e.source_id "
+                    "where e.id = %s", (evidence_id,))
+                return await cur.fetchone()
+
     async def list_for_conflict_engine(self, project_id: str, run_id: str) -> list[dict]:
         """Evidence rows for one run, joined to `sources` for `tier` --
         `evidence_items` itself carries no tier column (PRD §16.2: tier is a
@@ -238,6 +251,15 @@ class AssumptionRepo:
                     "select * from assumptions where project_id = %s "
                     "order by created_at", (project_id,))
                 return await cur.fetchall()
+
+    async def get(self, assumption_id: str) -> dict | None:
+        """Task 5.2: an R3 (founder_vs_world) conflict's `left_ref` names the
+        founder's own assumption row, not an evidence row."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from assumptions where id = %s", (assumption_id,))
+                return await cur.fetchone()
 
     async def update_status_and_strength(self, assumption_id: str, status: str,
                                          strength: float) -> None:
@@ -447,6 +469,17 @@ class ConflictRepo:
                      rule, severity),
                 )
                 return _row_id(await cur.fetchone())
+
+    async def get(self, conflict_id: str) -> dict | None:
+        """Task 5.2: cross-examination loads one conflict's full row (kind,
+        rule, severity, left_ref, right_ref, assumption_id) by id -- the
+        `state["conflicts"]` list only carries the fields `select_conflicts_
+        for_cross_exam` needs to choose among conflicts, not enough to argue
+        one."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute("select * from conflicts where id = %s", (conflict_id,))
+                return await cur.fetchone()
 
     async def add_position_delta(self, conflict_id: str, chair: str, before: str,
                                  after: str, reason: str,

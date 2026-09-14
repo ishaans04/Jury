@@ -1,0 +1,52 @@
+-- Task 5.2 (Batch S): discovered while making cross-examination write its
+-- first-ever non-null `position_deltas.new_evidence_id` (every prior test of
+-- ConflictRepo.add_position_delta, tests/db/test_repositories.py included,
+-- left that column NULL, which never exercises the FK check at all).
+--
+-- Same root cause as 0007/0008's already-documented finding, but the other
+-- edge of it. 0008's comment nails the mechanism for the DELETE side: a
+-- foreign key's existence check takes a `SELECT ... FOR KEY SHARE` lock, and
+-- Postgres's locking clauses (FOR UPDATE/FOR NO KEY UPDATE/FOR SHARE/FOR KEY
+-- SHARE) require UPDATE privilege on the table being locked, in addition to
+-- SELECT. 0008 fixed the case where evidence_items is deleted (the lock
+-- falls on the REFERENCING tables, e.g. position_deltas itself, checking
+-- nothing still points at the row being removed) by switching three FKs to
+-- ON DELETE CASCADE so that lock is never taken at all.
+--
+-- This is the mirror case: INSERTING a position_deltas row with a non-null
+-- new_evidence_id takes that same FOR KEY SHARE lock on evidence_items
+-- itself (the REFERENCED table this time, confirming the row exists and
+-- isn't concurrently removed) -- and evidence_items is exactly the one
+-- table 0003_immutability.sql revoked UPDATE on, from every role, including
+-- postgres. ON DELETE CASCADE does nothing for this direction; there is no
+-- way to avoid the lock here short of dropping the FK entirely, which would
+-- give up real referential integrity on evidence linkage. Confirmed by
+-- direct reproduction against local Postgres: plain `SELECT id FROM
+-- evidence_items LIMIT 1` succeeds for the `postgres` role; the identical
+-- query with `FOR KEY SHARE` fails with `permission denied for table
+-- evidence_items`, with or without `row_security`, and regardless of the
+-- role's BYPASSRLS attribute (this is a plain privilege check, not RLS).
+--
+-- Grant only `postgres` (the table owner, and the role every backend
+-- connection in this stack uses to write position_deltas -- see
+-- jury/db/pool.py: the graph's own pool is never `user_scoped_connection`
+-- for this write), exactly mirroring 0007_evidence_delete_via_cascade.sql's
+-- own precedent for the DELETE-side version of this same issue: anon/
+-- authenticated/service_role never perform this insert directly, so they
+-- keep zero UPDATE privilege on evidence_items, and
+-- tests/test_evidence_delete_via_cascade.py::test_authenticated_still_cannot_update_evidence
+-- (unchanged by this migration) still proves that.
+--
+-- Granting UPDATE back to postgres does NOT reopen P6: 0003's BEFORE UPDATE
+-- trigger (`jury_evidence_is_immutable`) raises unconditionally on every
+-- actual UPDATE attempt, for every role, regardless of grants -- exactly
+-- the "belt and braces" design 0003's own comment describes, where the
+-- trigger, not the REVOKE, is "the guarantee that actually holds against
+-- every possible caller". This grant restores only the ability to satisfy
+-- an inbound foreign key's row lock; it restores no ability to complete a
+-- real update, which the trigger still refuses regardless -- proven by
+-- tests/test_db_constraints.py::test_evidence_immutable_at_database_level
+-- (updated by this same batch to expect the trigger's RaiseException, in
+-- place of the REVOKE's now-bypassed InsufficientPrivilege, for `postgres`
+-- specifically).
+grant update on evidence_items to postgres;

@@ -92,8 +92,12 @@ def test_evidence_repo_exposes_no_mutation_methods():
     already on the list; an allowlist of the whole surface cannot be
     defeated by picking a different name."""
     public = {n for n in dir(EvidenceRepo) if not n.startswith("_")}
+    # Task 5.2 added `get` -- a single-row read (needed to load a conflict's
+    # evidence-type side by id for cross-examination), not a mutation; P6's
+    # allowlist is about the absence of update/delete/upsert-shaped methods,
+    # not the absence of reads.
     assert public == {"insert_verified", "list_for_project",
-                      "list_for_conflict_engine"}, public
+                      "list_for_conflict_engine", "get"}, public
 
 
 # ── EvidenceRepo.insert_verified ────────────────────────────────────────

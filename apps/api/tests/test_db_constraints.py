@@ -136,17 +136,27 @@ def test_evidence_immutable_at_database_level(conn):
     """P6: corrections supersede, never update.
 
     Connected as `postgres` -- the role the app and every other test in this
-    file use to reach the database, and the owner of evidence_items. It is
-    verified NOT to be a real superuser in this stack (rolsuper=false in
-    pg_roles), so the REVOKE in 0003_immutability.sql is what stops it here,
-    before the trigger is ever reached: InsufficientPrivilege, not the
-    trigger's RaiseException. See
-    test_evidence_immutable_against_superuser_at_database_level below for
-    proof that the trigger -- not just the REVOKE -- is the guarantee that
-    holds unconditionally, including against a role the REVOKE cannot touch.
+    file use to reach the database, and the owner of evidence_items. Until
+    0009_evidence_items_fk_lock_privilege.sql (Task 5.2, batch-S audit), the
+    REVOKE in 0003_immutability.sql stopped this UPDATE for `postgres`
+    directly, before the trigger was ever reached (InsufficientPrivilege).
+    0009 restores UPDATE to `postgres` (and anon/authenticated/service_role)
+    because Postgres's own FK-existence check -- `SELECT ... FOR KEY SHARE`,
+    run whenever another table inserts a row referencing evidence_items,
+    e.g. position_deltas.new_evidence_id -- requires UPDATE privilege on the
+    table being locked, which the blanket REVOKE made structurally
+    impossible for literally every role to satisfy. See 0009's own
+    migration comment for the full mechanism and how it was reproduced.
+    That grant does not reopen P6: the BEFORE UPDATE trigger raises
+    unconditionally regardless of grants, for every role -- this test now
+    proves exactly that for `postgres` (RaiseException, not
+    InsufficientPrivilege), the same guarantee
+    test_evidence_immutable_against_superuser_at_database_level below
+    already proved for a role the REVOKE could never have touched in the
+    first place.
     """
     seeded = _seed_minimal(conn)
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+    with pytest.raises(psycopg.errors.RaiseException, match="insert-only"):
         with conn.cursor() as cur:
             cur.execute(
                 "update evidence_items set confidence = 0.1 where id = %s",
