@@ -683,3 +683,55 @@ class LedgerVersionRepo:
                     "select * from ledger_versions where project_id = %s "
                     "order by version desc limit 1", (project_id,))
                 return await cur.fetchone()
+
+    async def create_next_version(self, project_id: str, run_id: str, snapshot: dict,
+                                  diff: list) -> int:
+        """Task 6.2: atomically computes and inserts the next dense,
+        monotonic version number for `project_id`.
+
+        Two concurrent callers for the same project must never receive the
+        same version number, and `unique (project_id, version)` alone is not
+        enough to guarantee that -- it only rejects the loser's INSERT after
+        both have already computed the SAME `coalesce(max(version),0)+1`
+        from a plain, unlocked SELECT. The fix is a `select ... for update`
+        against the ONE `projects` row for this project (not against
+        `ledger_versions`, which has no single row to lock for a project
+        that has zero prior versions) -- the second transaction's `for
+        update` blocks until the first commits, and by the time it runs its
+        own `max(version)+1` it sees the first writer's already-committed
+        row. Both statements run inside one transaction (`conn.transaction()`,
+        a savepoint if the connection is already mid-transaction, exactly
+        like `EvidenceRepo.insert_verified`'s use of the same pattern), so
+        the lock is held for the SELECT-then-INSERT as a single atomic unit,
+        not just for the SELECT.
+
+        `UniqueViolation` is still caught and retried once, belt-and-braces:
+        it should never fire given the lock above, but the brief asks for it
+        explicitly, and a retry is cheap insurance against any future caller
+        that inserts into `ledger_versions` outside this lock (a manual
+        migration, an admin script) without knowing about it.
+        """
+        for attempt in range(2):
+            try:
+                async with self._pool.connection() as conn:
+                    async with conn.transaction():
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                "select id from projects where id = %s for update",
+                                (project_id,))
+                            await cur.execute(
+                                "select coalesce(max(version), 0) + 1 "
+                                "from ledger_versions where project_id = %s",
+                                (project_id,))
+                            version = (await cur.fetchone())[0]
+                            await cur.execute(
+                                "insert into ledger_versions "
+                                "(project_id, run_id, version, snapshot, diff) "
+                                "values (%s,%s,%s,%s,%s)",
+                                (project_id, run_id, version, Json(snapshot), Json(diff)))
+                    return version
+            except psycopg.errors.UniqueViolation:
+                if attempt == 1:
+                    raise
+                continue
+        raise AssertionError("unreachable")  # pragma: no cover
