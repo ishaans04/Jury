@@ -386,9 +386,59 @@ P6 was **narrowed, not weakened**. Its purpose is that *corrections cannot silen
 ---
 
 
-## Phase 4 — Graph, five chairs, auth, hearing, boardroom
+## Phase 4 — Graph, five chairs, auth, hearing, boardroom ✅
 
-_Not started._
+**Completed 2026-09-14.** Commits `2c4f706`..`0457a37` on `build/jury-phases-0-7`.
+
+### What was built
+
+| Task | Deliverable |
+|---|---|
+| 4.1 | Archetype detection, assumption extraction (3-axis), coverage-gap report |
+| 4.2 | The four remaining chairs — customer, precedent, dependencies, economics |
+| 4.3 | Durable LangGraph pipeline: archetype → extract → coverage → [interrupt: hearing] → Send ×5 → reconcile, Postgres checkpointer |
+| 4.4 | FastAPI surface: project + run control, JWT auth, no `/evidence` route |
+| 4.5 | Next.js web app: magic-link auth, dashboard, pitch intake, assumption hearing |
+| 4.6 | Live boardroom on Supabase Realtime ledger rows |
+
+### Gate command and actual output
+
+```
+$ cd apps/api && JURY_OFFLINE=1 uv run pytest -q     ->  633 passed
+$ cd apps/web && npm test                             ->  25 passed (4 files)
+```
+
+The graph's load-bearing behaviours are proven within the 633: the pipeline pauses at the hearing with **zero evidence rows written** (counted at the interrupt, not assumed from topology); all five chairs run under `Send` and their contributions **merge cleanly** via an additive reducer — the merge test finds all five distinct chair names in real `evidence_items` rows; `reconcile` runs R1–R5 with **no LLM call**; a replayed node writes no duplicate rows; the run resumes from the last completed node with a fresh graph instance.
+
+### Notes on the boardroom gate
+
+The literal "row → correct column within 2s" and "reload preserves state" are live-Realtime + browser checks deferred to deploy/demo time (Phase 7). Their **logic** is proven at vitest without a browser: an inserted row routes to its chair's column, an empty column renders nothing (a chair speaks only by writing a persisted row — no fake placeholder), and on reconnect the client **refetches** rather than trusting the socket (the test asserts the refetch call-count rises on re-subscribe). The E2E spec is written and self-skips without a seeded live run.
+
+### Correctness bugs found and fixed during review
+
+| # | Defect | Where |
+|---|---|---|
+| 1 | `class_key` was trusted from the model, never validated against the checklist | 4.1 — an invented key attached to a persisted assumption as an unresolvable FK. Now dropped to `None` with a trace row |
+| 2 | Extraction cleared `discovered_by` but never clamped `origin` | 4.1 — a model returning `origin="discovered"` could falsely attribute a founder assumption to a chair. Now clamped |
+| 3 | Dependencies guard's numeric fields were never grounded in the excerpt | 4.2 — an opinion dressed with a fabricated `value_num` passed the structural guard and verification. Now each populated value's digits must appear in the cited excerpt |
+| 4 | `AssumptionRepo.create_many` crashed on a founder-added assumption with no `class_key` | 4.3 — exactly the shape the hearing produces |
+| 5 | `ForeignKeyViolation` race between the request transaction and `BackgroundTasks` | 4.3 — the run row was not visible to the background task before it wrote `run_events`. Fixed by per-checkout commit |
+
+### Deviations from `docs/PRD.md`
+
+| # | Deviation | Reason |
+|---|---|---|
+| D16 | Background graph writes are not RLS-scoped; access is enforced at the API boundary | `POST /projects/{id}/runs` verifies ownership via the RLS-scoped user pool (a non-owner's lookup returns 404) before the run is dispatched, and the ids are fixed thereafter. Threading a per-request JWT into a weeks-resumable checkpointed run is wrong — the JWT expires |
+| D17 | `POST /runs/{id}/cancel` is acknowledgement-only | Satisfies PRD §13's "checkpoint retained"; interrupting an in-flight coroutine is a later refinement |
+| D18 | `RunState.run_status="partial"` lives only in graph state | The `runs.status` CHECK has no `partial` value; the persisted status stays CHECK-valid. Coverage/verdict still account for degradation |
+
+### Carried into Phase 5
+
+- Emit a `run_events` row (or add a `runs.degradation` column) when a chair sets `ChairResult.partial`, so the boardroom's `partial` badge sees budget degradation, not only errors. The verdict already accounts for it; only the UI badge is currently blind.
+- Resolve the `run_status="partial"` vs `runs.status` tension when the jury node persists the final status.
+
+---
+
 
 ## Phase 5 — Cross-examination, economics, verdict (cut line)
 
