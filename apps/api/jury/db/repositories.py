@@ -193,12 +193,20 @@ class EvidenceRepo:
         across a project's whole history, not just the run that just
         finished -- a return-visit run must not forget evidence a prior run
         already gathered. Same `sources` join as `list_for_conflict_engine`
-        for `tier`, just scoped to the whole project instead of one run."""
+        for `tier`, just scoped to the whole project instead of one run.
+
+        Also carries `source_url` (`sources.canonical_url`) alongside tier --
+        Task 6.6's markdown export needs each evidence item's clickable
+        citation URL grouped by chair, and this is already the one project-
+        wide, tier-joined evidence read; adding one more joined column here
+        was preferred over a second near-duplicate query method (P6's
+        allowlist test on this class's public surface is exact-set, so a new
+        method name is not free)."""
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(
-                    "select e.*, s.tier as source_tier from evidence_items e "
-                    "join sources s on s.id = e.source_id "
+                    "select e.*, s.tier as source_tier, s.canonical_url as source_url "
+                    "from evidence_items e join sources s on s.id = e.source_id "
                     "where e.project_id = %s "
                     "order by e.created_at", (project_id,))
                 return await cur.fetchall()
