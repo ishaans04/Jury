@@ -81,7 +81,14 @@ async def _log_experiment_evidence(pool, *, project_id: str, run_id: str,
     test themselves, so there is nothing to verify against a live page.
     Mechanical, not modelled: the measured value is derived from the
     founder's own asserted value by plain arithmetic, never an LLM call."""
-    measured_value = (asserted_value * 0.5) if asserted_value is not None else float(result_value)
+    # The measured value is the founder's ACTUAL logged datum -- never a
+    # synthetic transform of the asserted value. It is exact for experiments
+    # that measure the variable directly (supplier_quote -> delivery_cost,
+    # landing_ctr -> cost-per-signup); for a proxy experiment (e.g. a presale
+    # whose metric is a prepay count rather than a price) it is the founder's
+    # real result rather than a fabricated derivation. `asserted_value` is
+    # intentionally unused here.
+    measured_value = float(result_value)
     excerpt = (f"Experiment result logged: {result_value} against pre-registered "
               f"kill criterion for {target_variable}.")[:240]
     source_url = f"https://jury.internal/experiments/{experiment_id}"
