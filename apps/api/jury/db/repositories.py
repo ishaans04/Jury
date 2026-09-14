@@ -513,6 +513,21 @@ class ConflictRepo:
                     "order by created_at", (project_id,))
                 return await cur.fetchall()
 
+    async def list_deltas(self, conflict_ids: list[str]) -> list[dict]:
+        """Task 5.4: the jury's friction summary names which conflicts were
+        actually argued and how they moved -- `position_deltas` carries no
+        project_id/run_id of its own (only `conflict_id`), so this reads by
+        the conflict id list the caller already has from `state["conflicts"]`
+        rather than requiring a join the schema doesn't otherwise need."""
+        if not conflict_ids:
+            return []
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from position_deltas where conflict_id = any(%s) "
+                    "order by id", (conflict_ids,))
+                return await cur.fetchall()
+
 
 class ModelRunRepo:
     """`model_runs` is an append-only log of computed economics scenarios;

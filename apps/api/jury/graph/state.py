@@ -60,7 +60,10 @@ class RunState(TypedDict, total=False):
     # later Phase 4/5 tasks
     cross_exam_done: bool
     model_run: dict[str, Any] | None
+    model_run_id: str | None
     verdict: dict[str, Any] | None
+    verdict_id: str | None
+    hung_jury_experiments: list[dict[str, Any]]
     experiments: list[dict[str, Any]]
 
     version: int
