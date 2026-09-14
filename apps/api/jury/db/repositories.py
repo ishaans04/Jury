@@ -159,6 +159,22 @@ class EvidenceRepo:
                     "order by created_at", (project_id,))
                 return await cur.fetchall()
 
+    async def list_for_conflict_engine(self, project_id: str, run_id: str) -> list[dict]:
+        """Evidence rows for one run, joined to `sources` for `tier` --
+        `evidence_items` itself carries no tier column (PRD §16.2: tier is a
+        property of the source, assigned once when it is first fetched, not
+        re-derived per citing claim). `jury.engines.conflict` needs tier on
+        every item it compares, so the join happens here rather than forcing
+        every caller to fetch sources separately."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select e.*, s.tier as source_tier from evidence_items e "
+                    "join sources s on s.id = e.source_id "
+                    "where e.project_id = %s and e.run_id = %s "
+                    "order by e.created_at", (project_id, run_id))
+                return await cur.fetchall()
+
 
 class AssumptionRepo:
     def __init__(self, pool) -> None:
@@ -167,10 +183,16 @@ class AssumptionRepo:
     async def create_many(self, project_id: str, run_id: str,
                           assumptions: list[dict]) -> list[str]:
         """Bulk-insert founder-origin assumptions extracted from the hearing
-        (PRD §7.2). Each dict supplies at least `class_key`, `statement`,
-        `criticality`, `uncertainty`, `falsifiability`; `asserted_variable`/
+        (PRD §7.2). Each dict supplies at least `statement`, `criticality`,
+        `uncertainty`, `falsifiability`; `class_key`/`asserted_variable`/
         `asserted_value`/`asserted_unit` are optional (a founder assertion
-        that carries no number is still an assumption)."""
+        that carries no number is still an assumption, and a founder-added
+        assumption from the hearing UI -- PRD §7.3's "the founder can add
+        their own" -- may not have been classified against the checklist at
+        all). `class_key` is read with `.get`, not `[...]`, for exactly that
+        reason: Task 4.3's own hearing-resume path passes founder-added
+        assumptions through this method with no `class_key` key present at
+        all, not merely one set to `None`."""
         ids = []
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
@@ -182,7 +204,7 @@ class AssumptionRepo:
                         "asserted_variable, asserted_value, asserted_unit) "
                         "values (%s,%s,%s,%s,'founder', %s,%s,%s, %s,%s,%s) "
                         "returning id",
-                        (project_id, run_id, a["class_key"], a["statement"],
+                        (project_id, run_id, a.get("class_key"), a["statement"],
                          a["criticality"], a["uncertainty"], a["falsifiability"],
                          a.get("asserted_variable"), a.get("asserted_value"),
                          a.get("asserted_unit")),
@@ -229,6 +251,147 @@ class AssumptionRepo:
                     "update assumptions set status = %s, strength = %s where id = %s",
                     (status, strength, assumption_id),
                 )
+
+
+class ProjectRepo:
+    """Task 4.4. `projects` is the top-level object the API exposes; every
+    write here is expected to run through a connection already switched to
+    `authenticated` for the owning user (`jury.db.pool.user_scoped_connection`)
+    so RLS is the actual access-control boundary, not this class's own logic.
+    """
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, user_id: str, name: str, target_scope: dict,
+                     archetype: str | None = None) -> dict:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "insert into projects (user_id, name, archetype, target_scope) "
+                    "values (%s,%s,%s,%s) returning *",
+                    (user_id, name, archetype, Json(target_scope)),
+                )
+                return await cur.fetchone()
+
+    async def get(self, project_id: str) -> dict | None:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute("select * from projects where id = %s", (project_id,))
+                return await cur.fetchone()
+
+    async def list_for_user(self, user_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from projects where user_id = %s order by created_at",
+                    (user_id,))
+                return await cur.fetchall()
+
+    async def update(self, project_id: str, *, archetype: str | None = None,
+                     target_scope: dict | None = None,
+                     name: str | None = None) -> dict | None:
+        """Patch only the fields actually supplied (PRD §13: archetype is
+        user-overridable). Nothing here bypasses RLS -- an update against a
+        project the caller's role cannot see simply matches zero rows."""
+        sets, params = [], []
+        if archetype is not None:
+            sets.append("archetype = %s")
+            params.append(archetype)
+        if target_scope is not None:
+            sets.append("target_scope = %s")
+            params.append(Json(target_scope))
+        if name is not None:
+            sets.append("name = %s")
+            params.append(name)
+        if not sets:
+            return await self.get(project_id)
+        sets.append("updated_at = now()")
+        params.append(project_id)
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    f"update projects set {', '.join(sets)} where id = %s returning *",
+                    params,
+                )
+                return await cur.fetchone()
+
+
+class PitchRepo:
+    """`pitches` records the founder's raw intake text and any uploaded
+    artifact metadata (PRD §17.4). No update method: a pitch is what the
+    founder submitted at intake, and `artifacts` is append-only via
+    `add_artifact`'s `jsonb ||` concatenation, never a wholesale replace."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, project_id: str, body: str) -> str:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "insert into pitches (project_id, body) values (%s, %s) "
+                    "returning id",
+                    (project_id, body),
+                )
+                return _row_id(await cur.fetchone())
+
+    async def add_artifact(self, project_id: str, artifact: dict) -> None:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "update pitches set artifacts = artifacts || %s::jsonb "
+                    "where project_id = %s and id = "
+                    "(select id from pitches where project_id = %s "
+                    "order by created_at desc limit 1)",
+                    (Json([artifact]), project_id, project_id),
+                )
+
+
+class RunRepo:
+    """Task 4.4. `runs` tracks the graph's own progress; `status` only ever
+    takes one of the schema's CHECK values (`pending|hearing|investigating|
+    cross_exam|deciding|complete|failed`) -- a chair degrading to partial
+    evidence (PRD §18) is tracked in the graph's own `RunState.run_status`
+    (jury/graph/state.py), never written here as a run status, since
+    'partial' is not one of the values the CHECK constraint allows."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def create(self, project_id: str, user_id: str, thread_id: str,
+                     kind: str = "initial") -> dict:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "insert into runs (project_id, user_id, kind, status, thread_id) "
+                    "values (%s,%s,%s,'pending',%s) returning *",
+                    (project_id, user_id, kind, thread_id),
+                )
+                return await cur.fetchone()
+
+    async def get(self, run_id: str) -> dict | None:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute("select * from runs where id = %s", (run_id,))
+                return await cur.fetchone()
+
+    async def update_status(self, run_id: str, status: str) -> None:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                completed = ", completed_at = now()" if status in ("complete", "failed") else ""
+                await cur.execute(
+                    f"update runs set status = %s{completed} where id = %s",
+                    (status, run_id),
+                )
+
+    async def list_events(self, run_id: str) -> list[dict]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "select * from run_events where run_id = %s order by ts, id",
+                    (run_id,))
+                return await cur.fetchall()
 
 
 class ConflictRepo:

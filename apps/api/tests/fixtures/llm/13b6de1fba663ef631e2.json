@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": null, \"new_assumption\": {\"statement\": \"Industry average CAC is 400 INR per account\", \"class_key\": \"saas.channel_cost\"}, \"direction\": \"supports\", \"variable\": \"cac\", \"value_num\": 400.0, \"value_min\": null, \"value_max\": null, \"unit\": \"INR\", \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://graphco-econ.test/benchmarks\", \"source_tier\": 2, \"excerpt\": \"Industry average CAC for SMB invoicing SaaS is 400 INR per acquired account.\", \"chair\": \"economics\"}"
+}

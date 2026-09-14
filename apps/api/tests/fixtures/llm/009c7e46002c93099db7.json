@@ -1,0 +1,3 @@
+{
+  "text": "{\"archetype\": \"subscription_saas\", \"confidence\": 0.9, \"inferred_scope\": {\"geo\": \"IN\", \"segment\": \"smb\", \"tier\": null, \"period\": null}, \"reasoning\": \"GraphCo pitch fixture for the Task 4.3 graph integration test.\"}"
+}

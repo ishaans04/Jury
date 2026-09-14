@@ -92,7 +92,8 @@ def test_evidence_repo_exposes_no_mutation_methods():
     already on the list; an allowlist of the whole surface cannot be
     defeated by picking a different name."""
     public = {n for n in dir(EvidenceRepo) if not n.startswith("_")}
-    assert public == {"insert_verified", "list_for_project"}, public
+    assert public == {"insert_verified", "list_for_project",
+                      "list_for_conflict_engine"}, public
 
 
 # ── EvidenceRepo.insert_verified ────────────────────────────────────────

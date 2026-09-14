@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": null, \"new_assumption\": {\"statement\": \"A similar invoicing startup shut down in 2021\", \"class_key\": \"saas.incumbency\"}, \"direction\": \"refutes\", \"variable\": null, \"value_num\": null, \"value_min\": null, \"value_max\": null, \"unit\": null, \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.65, \"source_url\": \"https://graphco-precedent.test/news\", \"source_tier\": 2, \"excerpt\": \"A similar invoicing startup called LedgerCo shut down in 2021 after two years.\", \"chair\": \"precedent\"}"
+}

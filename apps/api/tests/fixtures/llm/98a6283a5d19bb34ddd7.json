@@ -1,0 +1,3 @@
+{
+  "text": "{\"assumption_id\": null, \"new_assumption\": {\"statement\": \"The payments API charges 2.9 percent plus 30 cents\", \"class_key\": \"saas.dependency_risk\"}, \"direction\": \"refutes\", \"variable\": \"payments_api_price\", \"value_num\": 2.9, \"value_min\": null, \"value_max\": null, \"unit\": \"percent_plus_30_cents\", \"scope\": {\"geo\": \"IN\", \"segment\": \"smb\"}, \"confidence\": 0.6, \"source_url\": \"https://graphco-deps.test/docs\", \"source_tier\": 1, \"excerpt\": \"Standard pricing is 2.9 percent plus 30 cents per charge for the payments API.\", \"chair\": \"dependencies\"}"
+}
