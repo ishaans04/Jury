@@ -20,6 +20,7 @@ dependencies = [
   "python-jose[cryptography]>=3.3",
   "tenacity>=9.0",
   "google-play-scraper>=1.2.7",
+  "python-multipart>=0.0.12",
 ]
 
 [dependency-groups]

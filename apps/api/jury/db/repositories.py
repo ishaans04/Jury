@@ -253,6 +253,26 @@ class AssumptionRepo:
                 )
 
 
+class AssumptionClassRepo:
+    """Read-only access to the hand-seeded checklist (P4). Task 4.4 needs
+    this to hand `jury.graph.build.run_initial`/`resume_hearing` the right
+    archetype-specific `classes` list -- the graph itself never looks this
+    up (jury/graph/nodes/extract.py, coverage.py: `classes` is always data
+    the caller already has in hand, never queried or invented internally)."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def list_for_archetype(self, archetype: str) -> list[tuple[str, float, str]]:
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "select key, crit_weight, question from assumption_classes "
+                    "where archetype = %s order by key", (archetype,))
+                rows = await cur.fetchall()
+                return [(key, float(weight), question) for key, weight, question in rows]
+
+
 class ProjectRepo:
     """Task 4.4. `projects` is the top-level object the API exposes; every
     write here is expected to run through a connection already switched to
@@ -360,14 +380,27 @@ class RunRepo:
         self._pool = pool
 
     async def create(self, project_id: str, user_id: str, thread_id: str,
-                     kind: str = "initial") -> dict:
+                     kind: str = "initial", run_id: str | None = None) -> dict:
+        """`run_id` is accepted explicitly (rather than always letting
+        Postgres default it) because `jury.graph.build` uses the run's own
+        id as the checkpointer's `thread_id` -- the caller needs to know the
+        id before the checkpointed graph is ever invoked, so the API layer
+        generates it up front and this insert just uses it, instead of a
+        two-step insert-then-update dance."""
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    "insert into runs (project_id, user_id, kind, status, thread_id) "
-                    "values (%s,%s,%s,'pending',%s) returning *",
-                    (project_id, user_id, kind, thread_id),
-                )
+                if run_id is not None:
+                    await cur.execute(
+                        "insert into runs (id, project_id, user_id, kind, status, thread_id) "
+                        "values (%s,%s,%s,%s,'pending',%s) returning *",
+                        (run_id, project_id, user_id, kind, thread_id),
+                    )
+                else:
+                    await cur.execute(
+                        "insert into runs (project_id, user_id, kind, status, thread_id) "
+                        "values (%s,%s,%s,'pending',%s) returning *",
+                        (project_id, user_id, kind, thread_id),
+                    )
                 return await cur.fetchone()
 
     async def get(self, run_id: str) -> dict | None:
