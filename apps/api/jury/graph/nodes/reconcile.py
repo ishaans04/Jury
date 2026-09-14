@@ -25,6 +25,23 @@ from jury.transport.protocols import Transports
 
 NODE = "reconcile"
 
+# Mirrors jury.engines.conflict.DetectedConflict.triggers_cross_exam exactly
+# (R3 always; R1/R2 only at critical/high severity, i.e. a blocking/high
+# assumption -- _SEVERITY maps Criticality -> severity one-for-one; R4/R5
+# never). Not persisted in the `conflicts` table (no such column) -- it is a
+# pure function of kind+severity, computed fresh whenever `conflicts` is
+# threaded into RunState, exactly like it was computed once, in memory,
+# right after detection.
+_CROSS_EXAM_SEVERITY = frozenset({"critical", "high"})
+
+
+def _triggers_cross_exam(kind: str, severity: str) -> bool:
+    if kind == "founder_vs_world":
+        return True
+    if kind == "chair_vs_chair":
+        return severity in _CROSS_EXAM_SEVERITY
+    return False
+
 
 def _scope_of(row: dict) -> Scope:
     return Scope(geo=row["scope_geo"], segment=row["scope_segment"],
@@ -106,7 +123,9 @@ async def run_reconcile(state: RunState, *, pool, transports: Transports,
 
     return {
         "conflicts": [{"id": str(c["id"]), "rule": c["rule"], "kind": c["kind"],
-                      "severity": c["severity"]} for c in conflict_rows],
+                      "severity": c["severity"], "status": c["status"],
+                      "triggers_cross_exam": _triggers_cross_exam(c["kind"], c["severity"])}
+                     for c in conflict_rows],
         "coverage": {"score": score},
         "run_status": run_status,
     }
