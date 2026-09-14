@@ -139,6 +139,15 @@ async def test_cancel_retains_the_checkpoint(client, auth, run):
     assert r.json()["thread_id"]
 
 
+async def test_cancel_records_an_interrupt_trace_row(client, auth, run):
+    """A cancelled-and-left run must be distinguishable from a normal one in
+    the F17 trace, without touching the resumable checkpoint."""
+    await client.post(f"/runs/{run}/cancel", headers=auth)
+    events = (await client.get(f"/runs/{run}/events", headers=auth)).json()
+    assert any(e["event"] == "interrupt" and e["node"] == "cancel"
+               for e in events)
+
+
 def _all_paths(routes) -> set[str]:
     paths: set[str] = set()
     for r in routes:

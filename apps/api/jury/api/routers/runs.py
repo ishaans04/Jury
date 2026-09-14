@@ -17,6 +17,7 @@ from jury.db.repositories import AssumptionClassRepo, ProjectRepo, RunRepo
 from jury.graph.build import resume_hearing, run_initial
 from jury.schemas.assumption import AssumptionDraft
 from jury.settings import Settings
+from jury.tracing.events import PostgresTraceSink
 from jury.transport.factory import build_transports
 
 router = APIRouter(tags=["runs"])
@@ -117,9 +118,14 @@ async def cancel_run(run_id: str, pool=Depends(get_user_pool)):
     resumable, only the run row's own bookkeeping records the cancellation.
     No CHECK-constrained `runs.status` value means literally 'cancelled'
     (the allowed set is `pending|hearing|investigating|cross_exam|deciding|
-    complete|failed`), so this endpoint does not write a status at all; it
-    is a no-op acknowledgement over an unchanged, still-resumable run."""
+    complete|failed`), so this endpoint writes no status. It does record an
+    `interrupt` trace row on the run -- a cancel is a human-initiated
+    interrupt -- so a cancelled-and-left run is distinguishable from a normal
+    one in the F17 trace, without touching the still-resumable checkpoint."""
     row = await RunRepo(pool).get(run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="run not found")
+    await PostgresTraceSink(pool, run_id).emit(
+        node="cancel", event="interrupt",
+        detail={"reason": "cancel requested by user"})
     return _run_out(row)
