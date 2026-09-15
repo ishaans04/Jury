@@ -179,7 +179,18 @@ async def run_economics(state: RunState, *, repos: EconomicsRepos,
     if trace is not None:
         await trace.emit(node=NODE, event="node_start")
 
-    archetype = Archetype(state["archetype"])
+    # Every template is keyed by archetype. A run whose detection dropped
+    # (and whose founder never set one) has no template to solve -- degrade
+    # to "no model" with a visible trace row rather than crashing the run
+    # (PRD §18), so the jury can still rule on the evidence it has.
+    try:
+        archetype = Archetype(state.get("archetype"))
+    except ValueError:
+        if trace is not None:
+            await trace.emit(node=NODE, event="error",
+                             detail={"message": "no archetype set; economics model skipped"})
+            await trace.emit(node=NODE, event="node_end")
+        return {"model_run": None, "model_run_id": None}
     template_key = ARCHETYPE_TEMPLATES[archetype]
 
     params = await bind_parameters(state, repos=repos, transports=transports, trace=trace)

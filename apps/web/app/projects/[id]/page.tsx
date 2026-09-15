@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { api, type RunOut } from "@/lib/api";
+import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 import { ProjectView } from "./ProjectView";
 
 interface PageProps {
@@ -21,7 +23,7 @@ export default async function ProjectPage({ params }: PageProps) {
   } = await supabase.auth.getSession();
 
   if (!session) {
-    redirect(`/login?next=${encodeURIComponent(`/projects/${id}`)}`);
+    redirect("/?session=unavailable");
   }
 
   const project = await api.getProject(session.access_token, id).catch(() => null);
@@ -37,9 +39,16 @@ export default async function ProjectPage({ params }: PageProps) {
   const latestRun = (runRows?.[0] as RunOut | undefined) ?? null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="mb-6 text-xl font-semibold text-slate-900">{project.name}</h1>
+    <WorkspaceShell
+      title={project.name}
+      actions={
+        <Link href={`/projects/${id}/trace`} className="rounded-full px-3 py-2 text-sm text-[#5A5348] hover:bg-white/70">
+          Trace
+        </Link>
+      }
+    >
+      <h1 className="sr-only">{project.name}</h1>
       <ProjectView project={project} initialRun={latestRun} accessToken={session.access_token} />
-    </div>
+    </WorkspaceShell>
   );
 }

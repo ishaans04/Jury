@@ -53,8 +53,8 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from jury.db.repositories import (
-    AssumptionRepo, ConflictRepo, EvidenceRepo, ExperimentRepo, ModelRunRepo, SourceRepo,
-    VerdictRepo,
+    AssumptionRepo, ConflictRepo, EvidenceRepo, ExperimentRepo, ModelRunRepo, RunRepo,
+    SourceRepo, VerdictRepo,
 )
 from jury.graph.edges import route_after_reconcile
 from jury.graph.nodes.archetype import detect_archetype
@@ -116,12 +116,14 @@ async def build_graph(transports: Transports, pool, classes: list[tuple[str, flo
                                    trace=_trace(state))
 
     async def cross_exam_node(state: RunState) -> dict:
+        await RunRepo(pool).update_status(state["run_id"], "cross_exam")
         repos = CrossExamRepos(conflict=ConflictRepo(pool), evidence=EvidenceRepo(pool),
                                source=SourceRepo(pool), assumption=AssumptionRepo(pool))
         return await cross_examine(state, transports=transports, repos=repos,
                                    trace=_trace(state))
 
     async def economics_node(state: RunState) -> dict:
+        await RunRepo(pool).update_status(state["run_id"], "deciding")
         repos = EconomicsRepos(evidence=EvidenceRepo(pool), assumption=AssumptionRepo(pool),
                                model_run=ModelRunRepo(pool))
         return await run_economics(state, repos=repos, transports=transports,
@@ -169,6 +171,23 @@ async def build_graph(transports: Transports, pool, classes: list[tuple[str, flo
     return builder.compile(checkpointer=checkpointer)
 
 
+async def _invoke_tracking_status(graph: CompiledStateGraph, payload, config: dict, *,
+                                  pool, run_id: str) -> RunState:
+    """Runs the graph and keeps `runs.status` truthful -- the only signal a
+    client has for where a run is (the web app polls `GET /runs/{id}`):
+    `hearing` while paused at the interrupt, `complete` once the graph ends,
+    `failed` if it raises. Intermediate stages are marked by the nodes."""
+    runs = RunRepo(pool)
+    try:
+        state = await graph.ainvoke(payload, config)
+    except Exception:
+        await runs.update_status(run_id, "failed")
+        raise
+    snapshot = await graph.aget_state(config)
+    await runs.update_status(run_id, "hearing" if snapshot.next else "complete")
+    return state
+
+
 async def run_initial(project_id: str, run_id: str, pitch: str, target_scope: dict, *,
                       transports: Transports, pool, classes: list[tuple[str, float, str]],
                       settings: Settings | None = None) -> RunState:
@@ -178,22 +197,32 @@ async def run_initial(project_id: str, run_id: str, pitch: str, target_scope: di
     can execute until this same thread is resumed."""
     graph = await build_graph(transports, pool, classes, settings=settings)
     config = {"configurable": {"thread_id": run_id}}
-    return await graph.ainvoke(
+    return await _invoke_tracking_status(
+        graph,
         {"run_id": run_id, "project_id": project_id, "pitch": pitch,
          "target_scope": target_scope},
-        config)
+        config, pool=pool, run_id=run_id)
 
 
 async def resume_hearing(run_id: str, edited_assumptions: list[dict], *,
                          transports: Transports, pool, classes: list[tuple[str, float, str]],
-                         settings: Settings | None = None) -> RunState:
+                         settings: Settings | None = None,
+                         archetype: str | None = None) -> RunState:
     """Resumes a run paused at the hearing with the founder's confirmed
     assumption list -- edits, deletions and additions all included. A fresh
     `build_graph` call each time (rather than caching a compiled graph across
     calls) is deliberate: it is what lets
     `tests/graph/test_graph.py::test_the_run_resumes_from_the_last_completed_node_after_a_crash`
     prove resumability from a brand-new process, not just from a graph object
-    that happened to still be sitting in memory."""
+    that happened to still be sitting in memory.
+
+    `archetype`, when given, is the project's current (possibly
+    founder-corrected) archetype and overwrites the run state's detected one
+    on resume -- otherwise a dropped detection could never be fixed from the
+    hearing, and the economics template would stay unselectable."""
     graph = await build_graph(transports, pool, classes, settings=settings)
     config = {"configurable": {"thread_id": run_id}}
-    return await graph.ainvoke(Command(resume=edited_assumptions), config)
+    await RunRepo(pool).update_status(run_id, "investigating")
+    command = (Command(resume=edited_assumptions, update={"archetype": archetype})
+               if archetype else Command(resume=edited_assumptions))
+    return await _invoke_tracking_status(graph, command, config, pool=pool, run_id=run_id)

@@ -27,7 +27,7 @@ export function AssumptionRow({ index, assumption, onChange, onDelete }: Assumpt
 
   return (
     <div
-      className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4"
+      className="flex flex-col gap-3 rounded-2xl border border-[#EFE7D8] bg-white/80 p-4"
       data-testid="assumption-row"
       data-scored={fullyScored}
     >

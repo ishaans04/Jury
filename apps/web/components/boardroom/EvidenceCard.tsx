@@ -24,7 +24,7 @@ export function EvidenceCard({ item }: { item: EvidenceItem }) {
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-3 text-sm"
+      className="flex flex-col gap-2 rounded-2xl border border-[#EFE7D8] bg-white/80 p-3 text-sm"
       data-testid="evidence-card"
     >
       <div className="flex items-center justify-between gap-2">
@@ -38,10 +38,10 @@ export function EvidenceCard({ item }: { item: EvidenceItem }) {
         )}
       </div>
 
-      <p className="text-slate-700">&ldquo;{item.excerpt}&rdquo;</p>
+      <p className="text-[#3D3830]">&ldquo;{item.excerpt}&rdquo;</p>
 
       {item.variable && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-[#6B645A]">
           {item.variable}
           {item.value_num !== null ? `: ${item.value_num}${item.unit ? ` ${item.unit}` : ""}` : ""}
         </p>
@@ -52,7 +52,7 @@ export function EvidenceCard({ item }: { item: EvidenceItem }) {
           href={source.canonical_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="truncate text-xs font-medium text-blue-600 underline underline-offset-2 hover:text-blue-800"
+          className="truncate text-xs font-medium text-[#5B5BF7] underline underline-offset-2 hover:text-[#3F3FD0]"
           data-testid="source-link"
         >
           {source.domain}

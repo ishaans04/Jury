@@ -1,0 +1,59 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - navigation "Workspace" [ref=e5]:
+        - generic [ref=e6]:
+          - link "The Jury" [ref=e7] [cursor=pointer]:
+            - /url: /projects
+          - generic [ref=e10]: New project
+        - link "Projects" [ref=e12] [cursor=pointer]:
+          - /url: /projects
+    - main [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - heading "The Jury is seated." [level=1] [ref=e16]
+          - paragraph [ref=e17]: Describe the idea in 200–2000 characters. The Jury will detect the archetype and draft the assumptions you'll confirm next.
+        - generic [ref=e18]:
+          - generic [ref=e28]: THE JURY
+          - status
+          - button "Market" [ref=e29]
+          - button "Chairman" [ref=e52]
+          - button "Customer" [ref=e76]
+          - button "Precedent" [ref=e102]
+          - button "Economics" [ref=e114]
+          - button "Dependencies" [ref=e126]
+        - generic [ref=e138]:
+          - generic [ref=e139]:
+            - generic [ref=e140]:
+              - generic [ref=e141]: Project name
+              - textbox "Project name" [ref=e142]
+            - generic [ref=e143]:
+              - generic [ref=e144]: Target geography
+              - combobox "Target geography" [ref=e145]:
+                - option "IN"
+                - option "US" [selected]
+                - option "EU"
+                - option "UK"
+                - option "SEA"
+                - option "MENA"
+                - option "LATAM"
+                - option "GLOBAL"
+            - generic [ref=e146]:
+              - generic [ref=e147]: Target segment
+              - combobox "Target segment" [ref=e148]:
+                - option "consumer"
+                - option "prosumer"
+                - option "smb" [selected]
+                - option "mid_market"
+                - option "enterprise"
+                - option "public_sector"
+          - generic [ref=e149]:
+            - generic [ref=e150]: Pitch
+            - textbox "Pitch" [ref=e151]:
+              - /placeholder: "Pitch your idea: who it's for, what it costs, how it makes money…"
+            - generic [ref=e152]:
+              - generic [ref=e153]: 0 / 2000
+              - button "Create project and start hearing" [disabled]:
+                - generic: Stress Test

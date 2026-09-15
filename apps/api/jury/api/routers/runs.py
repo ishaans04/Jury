@@ -103,10 +103,14 @@ async def confirm_hearing(run_id: str, body: HearingConfirm,
     classes = await _classes_for(pool, str(run["project_id"]))
     transports = build_transports(app_settings)
     edited = [a.model_dump(mode="json") for a in body.assumptions]
+    # The project row is authoritative for archetype: the founder may have
+    # corrected it in the hearing (PATCH /projects/{id}) after detection.
+    project = await ProjectRepo(pool).get(str(run["project_id"]))
 
     background_tasks.add_task(
         resume_hearing, run_id, edited, transports=transports, pool=app_pool,
-        classes=classes, settings=app_settings)
+        classes=classes, settings=app_settings,
+        archetype=project.get("archetype") if project else None)
 
     return {"run_id": run_id, "status": "investigating"}
 

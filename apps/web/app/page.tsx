@@ -1,8 +1,7 @@
-import { redirect } from "next/navigation";
+import { Landing } from "@/components/landing/Landing";
 
-/** The root route has no product surface of its own — the four-screen auth
- * and navigation surface (PRD §14.2) starts at `/projects` for a signed-in
- * founder, or `/login` otherwise (`middleware.ts` handles that redirect). */
+/** `/` — the public landing page for The Jury. Signed-in surfaces start at
+ * `/projects`, which `middleware.ts` gates behind sign-in. */
 export default function RootPage() {
-  redirect("/projects");
+  return <Landing />;
 }

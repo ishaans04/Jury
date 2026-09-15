@@ -36,15 +36,16 @@ async def detect_archetype(state: RunState, *, transports: Transports,
 
     A dropped detection (the repair loop exhausts every stage, PRD §15.3
     mitigation 5) must not crash the graph -- it degrades to an unset
-    archetype and a zero confidence, and the founder still has the explicit
-    intake form (spec §26.2) as the path to a correct scope by hand.
+    archetype and a zero confidence, and leaves `target_scope` untouched: the
+    founder's explicit intake-form scope (spec §26.2) is already in state, and
+    every chair builds a `Scope` from it, so nulling it would crash all five.
     """
     prompt = archetype_detection_prompt(state["pitch"])
     report = await structured_report(
         transports.llm, role=_ROLE, prompt=prompt, schema=ArchetypeResult, trace=trace)
     result = report.value
     if result is None:
-        return {"archetype": None, "archetype_confidence": 0.0, "target_scope": None}
+        return {"archetype": None, "archetype_confidence": 0.0}
 
     return {
         "archetype": result.archetype.value,

@@ -85,6 +85,37 @@ export interface RunEvent {
   latency_ms: number | null;
 }
 
+/** `jury.engines.diff.DiffEntry`, as serialised into `ledger_versions.diff`. */
+export interface DiffEntry {
+  type: string;
+  subject: string;
+  before: unknown;
+  after: unknown;
+  detail?: Record<string, unknown>;
+}
+
+export interface LedgerVersion {
+  id: string;
+  project_id: string;
+  version: number;
+  run_id: string;
+  snapshot: Record<string, unknown>;
+  diff: DiffEntry[];
+  created_at: string;
+}
+
+export interface VersionDiffOut {
+  entries: DiffEntry[];
+  causal_sentence: string;
+}
+
+export interface LogResultOut {
+  experiment_status: string;
+  assumption_status: string | null;
+  version: number | null;
+  diff: DiffEntry[];
+}
+
 export const api = {
   createProject: (token: string, body: { name: string; pitch: string; target_scope: TargetScope }) =>
     request<ProjectOut>("/projects", token, { method: "POST", body: JSON.stringify(body) }),
@@ -128,4 +159,20 @@ export const api = {
 
   cancelRun: (token: string, runId: string) =>
     request<RunOut>(`/runs/${runId}/cancel`, token, { method: "POST" }),
+
+  listVersions: (token: string, projectId: string) =>
+    request<LedgerVersion[]>(`/projects/${projectId}/versions`, token),
+
+  getVersionDiff: (token: string, projectId: string, version: number) =>
+    request<VersionDiffOut>(`/projects/${projectId}/versions/${version}/diff`, token),
+
+  logExperimentResult: (
+    token: string,
+    experimentId: string,
+    body: { result_value: number; result_notes: string | null },
+  ) =>
+    request<LogResultOut>(`/experiments/${experimentId}/result`, token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

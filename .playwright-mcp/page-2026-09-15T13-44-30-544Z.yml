@@ -1,0 +1,226 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - navigation "Primary" [ref=e5]:
+        - link "The Jury" [ref=e6] [cursor=pointer]:
+          - /url: /
+        - generic [ref=e15]:
+          - link "How it works" [ref=e16] [cursor=pointer]:
+            - /url: "#how-it-works"
+          - link "Vs ChatGPT" [ref=e17] [cursor=pointer]:
+            - /url: "#vs-chatgpt"
+          - link "Your projects" [ref=e18] [cursor=pointer]:
+            - /url: /projects
+        - link "Stress Test" [ref=e19] [cursor=pointer]:
+          - /url: /projects/new
+    - main [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - generic [ref=e23]: The Jury · five chairs, one verdict
+          - heading "Don't build it. Prove it." [level=1] [ref=e25]: Don't build it.Prove it.
+          - paragraph [ref=e26]: Pitch your startup idea to five AI chairs that pull real evidence, run the unit economics live and cite every claim. When the evidence is thin, they refuse to guess.
+          - generic [ref=e27]:
+            - link "Stress Test Your Idea" [ref=e28] [cursor=pointer]:
+              - /url: /projects/new
+            - link "See how it works" [ref=e31] [cursor=pointer]:
+              - /url: "#how-it-works"
+          - list [ref=e32]:
+            - listitem [ref=e33]: Every claim cited
+            - listitem [ref=e37]: Deterministic maths
+            - listitem [ref=e40]: Refuses when unsure
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]:
+              - generic [ref=e57]: THE JURY
+              - status:
+                - generic: The Jury is deliberating
+            - button "Meet the Precedent chair" [ref=e58]:
+              - generic [ref=e77]: Precedent
+            - button "Meet the Market chair" [ref=e79]:
+              - generic [ref=e99]: Market
+            - button "Meet the Customer chair" [ref=e101]:
+              - generic [ref=e123]: Customer
+            - button "Meet the Economics chair" [ref=e125]:
+              - generic [ref=e144]: Economics
+            - button "Meet the Dependencies chair" [ref=e146]:
+              - generic [ref=e166]: Dependencies
+          - paragraph [ref=e168]: Tap a juror to meet them
+      - region [ref=e169]:
+        - generic [ref=e170]:
+          - paragraph [ref=e171]: How it works
+          - heading "From pitch to verdict, with receipts." [level=2] [ref=e172]
+        - generic [ref=e173]:
+          - tablist "Validation pipeline" [ref=e174]:
+            - tab "Step 1 Pitch" [selected] [ref=e175]:
+              - generic [ref=e179]:
+                - generic [ref=e180]: Step 1
+                - generic [ref=e181]: Pitch
+            - tab "Step 2 Hearing" [ref=e182]:
+              - generic [ref=e188]:
+                - generic [ref=e189]: Step 2
+                - generic [ref=e190]: Hearing
+            - tab "Step 3 Investigation" [ref=e191]:
+              - generic [ref=e196]:
+                - generic [ref=e197]: Step 3
+                - generic [ref=e198]: Investigation
+            - tab "Step 4 Cross-examination" [ref=e199]:
+              - generic [ref=e210]:
+                - generic [ref=e211]: Step 4
+                - generic [ref=e212]: Cross-examination
+            - tab "Step 5 Economics" [ref=e213]:
+              - generic [ref=e217]:
+                - generic [ref=e218]: Step 5
+                - generic [ref=e219]: Economics
+            - tab "Step 6 Verdict" [ref=e220]:
+              - generic [ref=e228]:
+                - generic [ref=e229]: Step 6
+                - generic [ref=e230]: Verdict
+            - tab "Step 7 Living ledger" [ref=e231]:
+              - generic [ref=e237]:
+                - generic [ref=e238]: Step 7
+                - generic [ref=e239]: Living ledger
+          - tabpanel "Step 1 Pitch" [ref=e240]:
+            - generic [ref=e242]:
+              - generic [ref=e243]: "01"
+              - heading "Pitch" [level=3] [ref=e244]
+              - paragraph [ref=e245]: Describe the idea in 200–2000 characters, with a target geography and segment.
+              - paragraph [ref=e246]: The Jury detects your business archetype — marketplace, SaaS, D2C and more — so each chair knows which assumptions matter most.
+        - heading "Meet the chairs" [level=3] [ref=e249]
+        - generic [ref=e250]:
+          - article [ref=e251]:
+            - generic [ref=e273]:
+              - heading "Market" [level=4] [ref=e274]
+              - paragraph [ref=e275]: Is the demand real, and big enough?
+            - paragraph [ref=e276]: Sizes the opportunity from tiered, verifiable sources — never from vibes.
+            - list [ref=e277]:
+              - listitem [ref=e278]: Market size and growth pulled from cited tier-1 and tier-2 sources
+              - listitem [ref=e280]: Competitor density and incumbents inside your exact geography
+              - listitem [ref=e282]: Scope gaps when the data doesn't match your target segment
+          - article [ref=e284]:
+            - generic [ref=e308]:
+              - heading "Customer" [level=4] [ref=e309]
+              - paragraph [ref=e310]: Will anyone actually pay for this?
+            - paragraph [ref=e311]: Tests pain frequency and willingness to pay against real buyer behaviour.
+            - list [ref=e312]:
+              - listitem [ref=e313]: Evidence of willingness to pay at your asserted price
+              - listitem [ref=e315]: How often the pain occurs, and what people use today
+              - listitem [ref=e317]: Switching costs that quietly kill adoption
+          - article [ref=e319]:
+            - generic [ref=e340]:
+              - heading "Economics" [level=4] [ref=e341]
+              - paragraph [ref=e342]: Do the numbers survive contact?
+            - paragraph [ref=e343]: Runs a deterministic unit-economics solver. The model never does arithmetic.
+            - list [ref=e344]:
+              - listitem [ref=e345]: Contribution margin, LTV/CAC and payback, solved live
+              - listitem [ref=e347]: Sensitivity tornado ranking what moves the outcome most
+              - listitem [ref=e349]: "Breakpoints: the exact value where the business turns unviable"
+          - article [ref=e351]:
+            - generic [ref=e372]:
+              - heading "Precedent" [level=4] [ref=e373]
+              - paragraph [ref=e374]: Has this been tried, and what happened?
+            - paragraph [ref=e375]: Finds the companies that walked this road before you and reads how it ended.
+            - list [ref=e376]:
+              - listitem [ref=e377]: Analogous startups, their outcomes and post-mortems
+              - listitem [ref=e379]: Funding and shutdown patterns for the archetype
+              - listitem [ref=e381]: Where the precedent diverges from your plan
+          - article [ref=e383]:
+            - generic [ref=e405]:
+              - heading "Dependencies" [level=4] [ref=e406]
+              - paragraph [ref=e407]: What must be true that you don't control?
+            - paragraph [ref=e408]: Maps regulatory, platform and supplier dependencies that can block you.
+            - list [ref=e409]:
+              - listitem [ref=e410]: Licences, regulation and registry checks
+              - listitem [ref=e412]: Platform, supplier and partner lock-in
+              - listitem [ref=e414]: Adjacency feasibility, so a refuted blocker can become a pivot
+          - article [ref=e416]:
+            - generic [ref=e441]:
+              - heading "Chairman" [level=4] [ref=e442]
+              - paragraph [ref=e443]: Proceed, pivot, or stop?
+            - paragraph [ref=e444]: Weighs the record, publishes the confidence formula, and refuses when it must.
+            - list [ref=e445]:
+              - listitem [ref=e446]: Evidence confidence shown with all four components, never bare
+              - listitem [ref=e448]: Refusal gates that return a hung jury instead of a guess
+              - listitem [ref=e450]: The three cheapest experiments that would break the deadlock
+      - region [ref=e452]:
+        - generic [ref=e453]:
+          - paragraph [ref=e454]: Vs ChatGPT
+          - heading "Advice sounds confident. Evidence is." [level=2] [ref=e455]
+        - table [ref=e457]:
+          - caption [ref=e458]: Generic LLM advice compared with The Jury
+          - rowgroup [ref=e459]:
+            - row [ref=e460]:
+              - columnheader "Capability" [ref=e461]
+              - columnheader "Generic LLM advice" [ref=e462]
+              - columnheader "The Jury" [ref=e463]
+          - rowgroup [ref=e464]:
+            - row [ref=e465]:
+              - rowheader "Evidence-backed retrieval" [ref=e466]
+              - cell [ref=e467]:
+                - generic [ref=e468]:
+                  - img "No" [ref=e469]
+                  - text: Answers from training data, which can be stale, generic or invented.
+              - cell [ref=e472]:
+                - generic [ref=e473]:
+                  - img "Yes" [ref=e474]
+                  - text: Chairs fetch live sources, verify each claim and tier its credibility.
+            - row [ref=e476]:
+              - rowheader "Live arithmetic" [ref=e477]
+              - cell [ref=e478]:
+                - generic [ref=e479]:
+                  - img "No" [ref=e480]
+                  - text: The model estimates numbers in prose, and the maths can drift.
+              - cell [ref=e483]:
+                - generic [ref=e484]:
+                  - img "Yes" [ref=e485]
+                  - text: A deterministic solver computes margins, LTV/CAC, payback and breakpoints.
+            - row [ref=e487]:
+              - rowheader "Cited audit trail" [ref=e488]
+              - cell [ref=e489]:
+                - generic [ref=e490]:
+                  - img "No" [ref=e491]
+                  - text: No record of where a claim came from, or how it was reached.
+              - cell [ref=e494]:
+                - generic [ref=e495]:
+                  - img "Yes" [ref=e496]
+                  - text: Every claim links to its source, and every run event is traceable.
+            - row [ref=e498]:
+              - rowheader "Refusal gates" [ref=e499]
+              - cell [ref=e500]:
+                - generic [ref=e501]:
+                  - img "No" [ref=e502]
+                  - text: Always produces an answer, however thin the evidence.
+              - cell [ref=e505]:
+                - generic [ref=e506]:
+                  - img "Yes" [ref=e507]
+                  - text: Declares a hung jury below coverage and confidence gates, then names the experiments.
+            - row [ref=e509]:
+              - rowheader "Adversarial review" [ref=e510]
+              - cell [ref=e511]:
+                - generic [ref=e512]:
+                  - img "No" [ref=e513]
+                  - text: One voice that tends to agree with whoever is asking.
+              - cell [ref=e516]:
+                - generic [ref=e517]:
+                  - img "Yes" [ref=e518]
+                  - text: Five chairs cross-examine each other and your own assertions.
+            - row [ref=e520]:
+              - rowheader "Memory of your progress" [ref=e521]
+              - cell [ref=e522]:
+                - generic [ref=e523]:
+                  - img "No" [ref=e524]
+                  - text: Each chat starts over.
+              - cell [ref=e527]:
+                - generic [ref=e528]:
+                  - img "Yes" [ref=e529]
+                  - text: A versioned ledger shows exactly what changed when you log results.
+      - generic [ref=e535]:
+        - heading "The Jury is waiting for your idea!" [level=2] [ref=e536]
+        - paragraph [ref=e537]: A few hundred words is all it takes. Walk out with a verdict, the evidence behind it, and the cheapest experiment to run next.
+        - link "Stress Test" [ref=e538] [cursor=pointer]:
+          - /url: /projects/new
+    - contentinfo [ref=e541]:
+      - link "The Jury" [ref=e542] [cursor=pointer]:
+        - /url: /
+      - paragraph [ref=e551]: Evidence over opinion. © 2026 The Jury

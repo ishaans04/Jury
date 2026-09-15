@@ -11,6 +11,9 @@ import { CoverageGaps } from "./CoverageGaps";
 
 export interface HearingProps {
   runId: string;
+  /** When set, an archetype the founder overrides here is saved to the
+   * project before confirming, so the resumed run uses it. */
+  projectId?: string;
   accessToken: string;
   archetype: Archetype | null;
   archetypeConfidence: number | null;
@@ -43,6 +46,7 @@ function blankAssumption(): HearingAssumption {
  */
 export function Hearing({
   runId,
+  projectId,
   accessToken,
   archetype: initialArchetype,
   archetypeConfidence,
@@ -85,6 +89,9 @@ export function Hearing({
     setSubmitting(true);
     setError(null);
     try {
+      if (projectId && archetype && archetype !== initialArchetype) {
+        await api.patchProject(accessToken, projectId, { archetype });
+      }
       await api.confirmHearing(
         accessToken,
         runId,
@@ -102,9 +109,9 @@ export function Hearing({
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 py-8">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Assumption hearing</h1>
-        <p className="text-sm text-slate-500">
-          Confirm, edit, or add the assumptions Jury will investigate. Nothing proceeds until every
+        <h1 className="text-xl font-semibold text-[#2A2620]">Assumption hearing</h1>
+        <p className="text-sm text-[#6B645A]">
+          Confirm, edit, or add the assumptions The Jury will investigate. Nothing proceeds until every
           assumption is scored on all three axes.
         </p>
       </div>
@@ -112,13 +119,13 @@ export function Hearing({
       <ArchetypeBadge archetype={archetype} confidence={archetypeConfidence} onOverride={setArchetype} />
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-900">Coverage gaps</h2>
+        <h2 className="text-sm font-semibold text-[#2A2620]">Coverage gaps</h2>
         <CoverageGaps gaps={coverageGaps} />
       </div>
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">Assumptions ({assumptions.length})</h2>
+          <h2 className="text-sm font-semibold text-[#2A2620]">Assumptions ({assumptions.length})</h2>
           <Button type="button" variant="outline" size="sm" onClick={addAssumption}>
             Add assumption
           </Button>
@@ -136,9 +143,9 @@ export function Hearing({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
+      <div className="flex items-center justify-end gap-3 border-t border-[#EFE7D8] pt-4">
         {!allScored && (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-[#6B645A]">
             Every assumption needs criticality, uncertainty, and falsifiability before you can confirm.
           </span>
         )}

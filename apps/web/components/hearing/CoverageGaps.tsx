@@ -20,7 +20,7 @@ const WEIGHT_LABEL: Record<number, string> = {
 export function CoverageGaps({ gaps }: CoverageGapsProps) {
   if (gaps.length === 0) {
     return (
-      <p className="text-sm text-slate-500" data-testid="coverage-gaps-empty">
+      <p className="text-sm text-[#6B645A]" data-testid="coverage-gaps-empty">
         No coverage gaps — every checklist class is touched by an assumption.
       </p>
     );
@@ -31,7 +31,7 @@ export function CoverageGaps({ gaps }: CoverageGapsProps) {
       {gaps.map((gap) => (
         <li
           key={gap.key}
-          className="flex items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2"
+          className="flex items-start justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2"
           data-testid="coverage-gap"
         >
           <span className="text-sm text-amber-900">{gap.question}</span>

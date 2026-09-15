@@ -17,15 +17,15 @@ interface ChairColumnProps {
 export function ChairColumn({ chair, items, partial }: ChairColumnProps) {
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="chair-column" data-chair={chair}>
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
-        <h3 className="text-sm font-semibold text-slate-900">{CHAIR_LABELS[chair]}</h3>
+      <div className="flex items-center justify-between gap-2 border-b border-[#EFE7D8] pb-2">
+        <h3 className="text-sm font-semibold text-[#2A2620]">{CHAIR_LABELS[chair]}</h3>
         <div className="flex items-center gap-2">
           {partial && (
             <Badge variant="warning" data-testid="chair-partial">
               partial
             </Badge>
           )}
-          <span className="text-xs text-slate-400">{items.length}</span>
+          <span className="text-xs text-[#9A9183]">{items.length}</span>
         </div>
       </div>
 

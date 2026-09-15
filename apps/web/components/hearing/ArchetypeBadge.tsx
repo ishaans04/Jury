@@ -19,7 +19,7 @@ interface ArchetypeBadgeProps {
  */
 export function ArchetypeBadge({ archetype, confidence, onOverride }: ArchetypeBadgeProps) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
+    <div className="flex flex-col gap-2 rounded-2xl border border-[#EFE7D8] bg-[#F7F1E6] p-4">
       <Label>Detected archetype</Label>
       <div className="flex flex-wrap items-center gap-3">
         {archetype ? (
@@ -31,7 +31,7 @@ export function ArchetypeBadge({ archetype, confidence, onOverride }: ArchetypeB
             Not classified
           </Badge>
         )}
-        <span className="text-xs text-slate-500" data-testid="archetype-confidence">
+        <span className="text-xs text-[#6B645A]" data-testid="archetype-confidence">
           {confidence !== null ? `${Math.round(confidence * 100)}% confidence` : "no confidence score"}
         </span>
       </div>
