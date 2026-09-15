@@ -11,7 +11,7 @@ before" -- `coverage_gaps`, computed pre-hearing, is a silence report; the
 `coverage` score computed here is post-investigation and answers a different
 question: how much of the checklist now carries evidence).
 """
-from jury.db.repositories import AssumptionRepo, ConflictRepo, EvidenceRepo
+from jury.db.repositories import AssumptionRepo, ConflictRepo, EvidenceRepo, RunRepo
 from jury.engines.conflict import (
     AssumptionForConflict, ConflictInput, EvidenceForConflict, detect_conflicts,
 )
@@ -116,7 +116,11 @@ async def run_reconcile(state: RunState, *, pool, transports: Transports,
     class_pairs = [(key, weight) for key, weight, _question in classes]
     score = score_coverage(class_pairs, assumption_likes)
 
-    run_status = "partial" if state.get("partial_chairs") else "ok"
+    partial_chairs = list(state.get("partial_chairs") or [])
+    run_status = "partial" if partial_chairs else "ok"
+    # Persist the degraded chairs onto the run row so a client can show the
+    # boardroom `partial` badge for the silent-budget path, not only for errors.
+    await RunRepo(pool).set_partial_chairs(run_id, partial_chairs)
 
     if trace is not None:
         await trace.emit(node=NODE, event="node_end")

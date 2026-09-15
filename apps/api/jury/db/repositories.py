@@ -463,6 +463,17 @@ class RunRepo:
                     (status, run_id),
                 )
 
+    async def set_partial_chairs(self, run_id: str, chairs: list[str]) -> None:
+        """Persist the chairs that degraded (budget exhaustion) so a client
+        reading the run row can surface the boardroom's `partial` badge for the
+        silent-budget path. Idempotent overwrite of the run's own bookkeeping."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "update runs set partial_chairs = %s where id = %s",
+                    (Json(sorted(set(chairs))), run_id),
+                )
+
     async def list_events(self, run_id: str) -> list[dict]:
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cur:

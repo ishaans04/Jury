@@ -7,6 +7,7 @@ fixture. No row created by any test here is ever actually persisted.
 """
 from jury.db.repositories import (
     AssumptionRepo,
+    RunRepo,
     ConflictRepo,
     EvidenceRepo,
     ExperimentRepo,
@@ -277,6 +278,18 @@ async def test_conflict_create_resolve_and_position_delta(pool):
 
 
 # ── ModelRunRepo ─────────────────────────────────────────────────────────
+
+async def test_run_partial_chairs_round_trips(pool):
+    """A degraded chair (budget exhaustion) is persisted on the run row so a
+    client can surface the boardroom `partial` badge -- the verdict already
+    accounts for degradation via coverage; this only makes it readable."""
+    fixtures = await _seed_project_chain(pool)
+    repo = RunRepo(pool)
+    assert (await repo.get(fixtures["run_id"]))["partial_chairs"] == []
+    await repo.set_partial_chairs(fixtures["run_id"], ["precedent", "customer", "precedent"])
+    stored = (await repo.get(fixtures["run_id"]))["partial_chairs"]
+    assert stored == ["customer", "precedent"]  # deduped and sorted
+
 
 async def test_model_run_create_and_list(pool):
     fixtures = await _seed_project_chain(pool)
