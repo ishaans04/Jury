@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict
 
 from jury.db.repositories import AssumptionRepo, ConflictRepo, EvidenceRepo, VerdictRepo
-from jury.engines.economics.solver import SensitivityEntry
+from jury.engines.economics.solver import SensitivityEntry, find_viable_adjacent
 from jury.engines.experiments import generate_experiments
 from jury.engines.scoring import (
     AssumptionLike, EvidenceLike, apply_gate, assign_status, coverage as score_coverage,
@@ -42,6 +42,7 @@ from jury.engines.scoring import (
 from jury.graph.state import RunState
 from jury.llm.models import TASK_ROLES
 from jury.llm.structured import structured_report
+from jury.schemas.economics import Parameter
 from jury.schemas.enums import AssumptionStatus, Criticality, Decision, Direction
 from jury.tracing.events import TraceSink
 from jury.transport.protocols import Transports
@@ -252,12 +253,15 @@ async def rule(state: RunState, *, repos: JuryRepos, transports: Transports,
     coverage_score = score_coverage(class_pairs, assumption_likes)
     model_run = state.get("model_run") or {}
     economics_viable = bool(model_run.get("viable", False))
-    # No adjacent-archetype economics is modelled anywhere in this phase
-    # (PRD §9.4's "no viable adjacent configuration found" needs a second,
-    # alternate-archetype solve this batch does not build) -- conservatively
-    # False rather than invented, which can only ever make STOP/HUNG_JURY
-    # more, never less, reachable than a real adjacent-viability check would.
+    # PRD §9.4: is there a viable configuration reachable by changing only
+    # the founder's still-guessed parameters, holding evidence-backed ones
+    # fixed? Pure computation over the persisted model run -- no new LLM
+    # call. A run that never reached economics (no model_run) has nothing to
+    # search over, so it stays conservatively False, same as before.
     has_viable_adjacent = False
+    if model_run.get("template_key") and model_run.get("parameters"):
+        parameters = {name: Parameter(**p) for name, p in model_run["parameters"].items()}
+        has_viable_adjacent = find_viable_adjacent(model_run["template_key"], parameters)
 
     gate = apply_gate(coverage_score, assumption_likes, confidence,
                       has_viable_adjacent, economics_viable, unresolved_critical)

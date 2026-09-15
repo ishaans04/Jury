@@ -413,6 +413,84 @@ async def test_evidence_confidence_is_recomputed_not_carried_forward(pool):
     assert out["verdict"]["evidence_confidence"] == pytest.approx(recomputed, abs=0.01)
 
 
+# ── has_viable_adjacent wiring: PRD §9.4 STOP vs PIVOT ──────────────────
+
+async def _seed_refuted_blocking(pool, suffix) -> dict:
+    """Mirrors `_seed_clean` (coverage 1.0, high confidence) but the blocking
+    assumption's evidence REFUTES rather than supports it, so the gate's
+    past-the-gate branch reaches `refuted_blocking`/`refuted_critical`
+    instead of a clean PROCEED."""
+    seed = await _seed_project(pool, suffix=suffix)
+    blocking_id = await _seed_assumption(pool, seed, criticality="blocking")
+    source_id = await _seed_source(pool, suffix=suffix)
+    for i in range(3):
+        await _seed_evidence(pool, seed, blocking_id, source_id, confidence=0.9,
+                             direction="refutes", dedup_suffix=f"-{i}")
+    return seed
+
+
+_SAAS_ADJACENT_VIABLE = {
+    # price/cogs are founder_asserted guesses: 150-200 is not viable, but
+    # moving price up and cogs down (within their ParamSpec bounds) is --
+    # same fixture proven in tests/engines/test_economics.py.
+    "price_monthly": {"value": 150.0, "unit": "currency_per_month",
+                      "provenance": "founder_asserted", "source_id": None,
+                      "assumption_id": None},
+    "cogs_monthly": {"value": 200.0, "unit": "currency_per_month",
+                     "provenance": "founder_asserted", "source_id": None,
+                     "assumption_id": None},
+    "cac": {"value": 4000.0, "unit": "currency", "provenance": "founder_asserted",
+           "source_id": None, "assumption_id": None},
+    "churn_monthly": {"value": 0.05, "unit": "fraction", "provenance": "founder_asserted",
+                      "source_id": None, "assumption_id": None},
+    "fixed_monthly": {"value": 50000.0, "unit": "currency", "provenance": "founder_asserted",
+                      "source_id": None, "assumption_id": None},
+}
+
+_SAAS_NO_ADJACENT_VIABLE = {
+    # cogs is pinned EVIDENCE_BACKED at a value no amount of founder-guessed
+    # price movement (up to its hi bound) can overcome -- no pivot exists.
+    "price_monthly": {"value": 100.0, "unit": "currency_per_month",
+                      "provenance": "founder_asserted", "source_id": None,
+                      "assumption_id": None},
+    "cogs_monthly": {"value": 5_000_000.0, "unit": "currency_per_month",
+                     "provenance": "evidence_backed", "source_id": "s1",
+                     "assumption_id": None},
+    "cac": {"value": 4000.0, "unit": "currency", "provenance": "evidence_backed",
+           "source_id": "s1", "assumption_id": None},
+    "churn_monthly": {"value": 0.05, "unit": "fraction", "provenance": "evidence_backed",
+                      "source_id": "s1", "assumption_id": None},
+    "fixed_monthly": {"value": 50000.0, "unit": "currency", "provenance": "evidence_backed",
+                      "source_id": "s1", "assumption_id": None},
+}
+
+
+def _model_run(parameters: dict) -> dict:
+    return {"template_key": "saas_v1", "parameters": parameters, "viable": False,
+           "sensitivity": [], "breakpoints": []}
+
+
+async def test_refuted_blocking_with_an_adjacent_viable_model_pivots(pool):
+    """PRD §9.4: a refuted blocking assumption is PIVOT, not STOP, when a
+    viable configuration is reachable by changing only founder guesses."""
+    seed = await _seed_refuted_blocking(pool, "-pivot")
+    state = _state(seed, model_run=_model_run(_SAAS_ADJACENT_VIABLE))
+    out = await rule(state, repos=_repos(pool),
+                     transports=_transports(FakeLLM(_plain_rationale())))
+    assert out["verdict"]["decision"] == "PIVOT"
+
+
+async def test_refuted_blocking_with_no_adjacent_viable_model_stops(pool):
+    """PRD §9.4: STOP means a refuted blocking assumption with no viable
+    adjacent configuration -- evidence-pinned costs the founder cannot wish
+    away by adjusting a guess."""
+    seed = await _seed_refuted_blocking(pool, "-stop")
+    state = _state(seed, model_run=_model_run(_SAAS_NO_ADJACENT_VIABLE))
+    out = await rule(state, repos=_repos(pool),
+                     transports=_transports(FakeLLM(_plain_rationale())))
+    assert out["verdict"]["decision"] == "STOP"
+
+
 async def test_the_rationale_cites_the_record_rather_than_offering_advice(pool):
     seed = await _seed_clean(pool, "-n")
     out = await rule(_state(seed), repos=_repos(pool),

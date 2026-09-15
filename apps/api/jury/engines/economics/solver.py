@@ -186,6 +186,71 @@ def _elasticity(template: Template, values: dict[str, float], name: str) -> floa
     return sum(deltas) / len(deltas) if deltas else 0.0
 
 
+def find_viable_adjacent(template_key: str, parameters: dict[str, Parameter]) -> bool:
+    """Is there a viable configuration reachable by changing only the
+    parameters that are still guesses? PRD §9.4: STOP means a refuted
+    blocking assumption with no viable adjacent configuration; PIVOT means
+    there is one. The gate consults this ONLY for that refuted-blocking
+    case -- it answers "is a DIFFERENT viable config reachable by changing
+    guesses", not "is the current config viable", so a currently-viable
+    config returns False here: there is nothing to pivot TO.
+
+    Deterministic, no Monte Carlo (PRD §16.5): every evidence_backed
+    parameter is held fixed at what the world actually shows -- you cannot
+    pivot away from evidence, only away from your own assumptions. Each
+    founder_asserted parameter is independently moved to whichever of its
+    ParamSpec bounds (lo/hi) yields the higher contribution margin, other
+    parameters held at their current (resolved) value. This is an
+    upper-bound, one-at-a-time search rather than a joint optimisation, but
+    it needs no hardcoded per-parameter sign and never invents viability
+    against evidence: if even the founder's best honest guesses, each
+    pushed to its most favourable plausible value, cannot clear viability,
+    no adjacent configuration can.
+
+    Known limitation: the search criterion is contribution margin, so a
+    founder_asserted parameter that moves ltv_cac but never appears in
+    contribution margin (e.g. a CAC-type parameter, per the templates' own
+    breakpoint fallback -- see solve()'s two-objective breakpoint search) is
+    left at its current value rather than moved, since margin gives no
+    signal on which bound helps it. A model refuted only because a
+    founder-guessed CAC is too high, with contribution margin already
+    healthy, will not find that particular pivot here. Accepted rather than
+    fixed: guessing a direction from a criterion the parameter does not
+    affect would be inventing a preference, not finding one.
+    """
+    template = TEMPLATES[template_key]
+    values, provenance = _resolve(template, parameters)
+
+    current_outputs = template.compute(values)
+    currently_viable = (current_outputs.contribution_margin > 0
+                        and current_outputs.ltv_cac >= _VIABLE_LTV_CAC)
+    if currently_viable:
+        return False
+
+    best_case = dict(values)
+    for name, spec in template.params.items():
+        if provenance[name] is not Provenance.FOUNDER_ASSERTED:
+            continue
+        margin_lo = _margin_at(template, values, name, spec.lo)
+        margin_hi = _margin_at(template, values, name, spec.hi)
+        if margin_hi > margin_lo:
+            best_case[name] = spec.hi
+        elif margin_lo > margin_hi:
+            best_case[name] = spec.lo
+        # Tie (this parameter does not move contribution margin at all --
+        # e.g. a CAC or churn parameter in these templates): leave it at its
+        # current value rather than picking an arbitrary bound. Picking
+        # blindly here would move a parameter that only affects ltv_cac (not
+        # margin) with no basis for direction, and could easily pick the
+        # bound that WORSENS ltv_cac while claiming to search for a
+        # best case -- undermining the "most favourable plausible value"
+        # this loop exists to find.
+
+    best_outputs = template.compute(best_case)
+    return (best_outputs.contribution_margin > 0
+           and best_outputs.ltv_cac >= _VIABLE_LTV_CAC)
+
+
 def solve(template_key: str, parameters: dict[str, Parameter]) -> ModelRunResult:
     """Execute the model, solve breakpoints, rank sensitivity.
 

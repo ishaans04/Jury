@@ -1,6 +1,6 @@
 import pytest
 
-from jury.engines.economics.solver import solve
+from jury.engines.economics.solver import find_viable_adjacent, solve
 from jury.engines.economics.templates import TEMPLATES
 from jury.schemas.economics import Parameter
 from jury.schemas.enums import Provenance
@@ -304,6 +304,65 @@ def test_bracket_nudge_still_finds_a_genuine_near_boundary_root():
 
     assert bp is not None
     assert bp.threshold == pytest.approx(0.0009, abs=1e-6)
+
+
+# ── find_viable_adjacent: PRD §9.4 pivot feasibility ────────────────────────
+
+SAAS_BASE = {
+    "price_monthly": p(150.0),                     # founder_asserted
+    "cogs_monthly": p(200.0),                       # founder_asserted
+    "cac": p(4000.0),
+    "churn_monthly": p(0.05, "fraction"),
+    "fixed_monthly": p(50000.0),
+}
+
+
+def test_no_adjacent_needed_when_already_viable():
+    """A currently-viable config has nothing to pivot to."""
+    assert solve("saas_v1", SAAS).viable is True
+    assert find_viable_adjacent("saas_v1", SAAS) is False
+
+
+def test_adjacent_viable_config_found_by_moving_founder_asserted_guesses():
+    """price_monthly=150, cogs_monthly=200 -> CM=-50, not viable. Both are
+    founder_asserted guesses, so the best-case search may move price up to
+    its hi bound and cogs down to its lo bound, which easily clears
+    viability. A pivot exists."""
+    r = solve("saas_v1", SAAS_BASE)
+    assert r.viable is False
+    assert find_viable_adjacent("saas_v1", SAAS_BASE) is True
+
+
+def test_evidence_backed_parameter_is_never_moved_even_to_rescue_viability():
+    """cogs_monthly is pinned at a large EVIDENCE_BACKED value (2,000,000) --
+    what the world actually shows. Even moving founder_asserted price_monthly
+    all the way to its hi bound (1,000,000) cannot clear a fixed cost of
+    2,000,000, so no adjacent configuration is viable. If the search moved
+    the evidence-backed cogs value instead (down to its lo bound, which
+    trivially fixes viability), this would come back True -- it must not."""
+    params = SAAS_BASE | {"cogs_monthly": p(2_000_000.0, "INR", "evidence_backed")}
+    r = solve("saas_v1", params)
+    assert r.viable is False
+    assert find_viable_adjacent("saas_v1", params) is False
+
+
+def test_still_not_viable_even_at_best_case_founder_asserted_values():
+    """fixed_monthly does not affect contribution_margin or ltv_cac at all
+    (it only affects breakeven volume), so it cannot rescue an unviable
+    margin no matter where it is moved. Pin the culprit (cogs) as evidence
+    and make price founder_asserted but already at a value that, even pushed
+    to its bound, still loses against the pinned cost -- an unreachable
+    pivot."""
+    params = {
+        "price_monthly": p(100.0),                                  # founder_asserted
+        "cogs_monthly": p(5_000_000.0, "INR", "evidence_backed"),     # pinned, huge
+        "cac": p(4000.0, "INR", "evidence_backed"),
+        "churn_monthly": p(0.05, "fraction", "evidence_backed"),
+        "fixed_monthly": p(50000.0, "INR", "evidence_backed"),
+    }
+    r = solve("saas_v1", params)
+    assert r.viable is False
+    assert find_viable_adjacent("saas_v1", params) is False
 
 
 def test_no_llm_is_reachable_from_the_economics_engine():
