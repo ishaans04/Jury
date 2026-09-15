@@ -754,21 +754,6 @@ Every phase records its exact gate command and **verbatim output** in [`CHANGELO
 
 ---
 
-## 📊 Project status
-
-| Phase | Scope | Status |
-|---|---|---|
-| 0 · Foundation | Schema, RLS, immutability, seeds, contracts | ✅ Complete |
-| 1 · Engines | Scope, dedup, scoring, gate, conflicts, economics, experiments, diff | ✅ Complete |
-| 2 · LLM layer | Gateway, repair loop, offline transport, tracing | ✅ Complete |
-| 3 · Retrieval | SSRF, tiers, fetch, verification, embeddings, Market chair | ✅ Complete |
-| 4 · Graph & boardroom | Five chairs, durable graph, hearing, live boardroom | ✅ Complete |
-| 5 · Verdict | Cross-examination, economics node, jury, experiments, SSE | ✅ Implemented |
-| 6 · Living ledger | Result logging, affected-only re-run, versions, causal diff, export | ✅ Implemented |
-| 7 · Deploy & backtest | Container, Cloud Run + Vercel, backtest report | 🚧 In progress |
-
----
-
 ## ⚠️ Honest limits
 
 We would rather tell you than have you find out.
