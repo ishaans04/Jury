@@ -16,41 +16,13 @@
 ![Groq](https://img.shields.io/badge/LLM-Groq%20via%20LiteLLM-F55036)
 ![Tests](https://img.shields.io/badge/backend%20tests-680%2B-brightgreen)
 
-[The problem](#-the-problem) · [Core idea](#-the-core-idea-in-one-example) · [How it works](#%EF%B8%8F-how-it-works) · [Architecture](#%EF%B8%8F-system-architecture) · [AI usage](#-how-ai-is-used-and-where-it-is-deliberately-not) · [Tech stack](#-tech-stack) · [Getting started](#-getting-started) · [Honest limits](#-honest-limits)
+[The problem](#-the-problem) · [Core idea](#-the-core-idea-in-one-example) · [How it works](#%EF%B8%8F-how-it-works) · [Architecture](#%EF%B8%8F-system-architecture) · [AI usage](#-how-ai-is-used-and-where-it-is-deliberately-not) · [Tech stack](#-tech-stack) · [Bring your own key](#-bring-your-own-key) · [Getting started](#-getting-started) · [Honest limits](#-honest-limits)
 
 <br/>
 
 <img src="docs/assets/screenshots/01-landing-hero.png" alt="The Jury landing page: five AI chairs seated around a boardroom table" width="100%"/>
 
 </div>
-
----
-
-## 📌 Table of contents
-
-1. [The problem](#-the-problem)
-2. [What The Jury solves](#-what-the-jury-solves)
-3. [The core idea in one example](#-the-core-idea-in-one-example)
-4. [Why we built this](#-why-we-built-this)
-5. [How it works](#%EF%B8%8F-how-it-works)
-6. [Meet the jurors](#-meet-the-jurors)
-7. [System architecture](#%EF%B8%8F-system-architecture)
-8. [How AI is used, and where it is deliberately not](#-how-ai-is-used-and-where-it-is-deliberately-not)
-9. [How it differs from ChatGPT, Claude and other LLMs](#-how-it-differs-from-chatgpt-claude-and-other-llms)
-10. [Scoring and the verdict gate](#-scoring-and-the-verdict-gate)
-11. [Tech stack](#-tech-stack)
-12. [Product principles, enforced in code](#-product-principles-enforced-in-code)
-13. [Security and data integrity](#-security-and-data-integrity)
-14. [Repository structure](#-repository-structure)
-15. [Getting started](#-getting-started)
-16. [API reference](#-api-reference)
-17. [Testing and quality](#-testing-and-quality)
-18. [Project status](#-project-status)
-19. [Honest limits](#-honest-limits)
-20. [Roadmap](#-roadmap)
-21. [Documentation](#-documentation)
-22. [Contributing](#-contributing)
-23. [License](#-license)
 
 ---
 
@@ -483,7 +455,7 @@ The gate's unreachability claim is **brute-force tested over 504 input combinati
 | **LangGraph** | The durable pipeline: `Send` fan-out to five chairs, conditional cross-exam edge, `interrupt()` at the hearing |
 | **langgraph-checkpoint-postgres** | Stores graph state in Postgres so a paused or crashed run resumes from its last completed node |
 | **Pydantic v2** / **pydantic-settings** | Typed contracts (`ClaimRecord`, `Scope`, `CriterionSpec`…), LLM output validation, env config |
-| **LiteLLM** | Single LLM gateway: model fallback chain, retries, budget caps, JSON mode, one-line provider swap |
+| **LiteLLM** | Single LLM gateway: model fallback chain, retries, budget caps, JSON mode |
 | **Groq** | LLM inference (Llama 3.3 70B, Llama 3.1 8B instant, GPT-OSS 120B) |
 | **psycopg 3** (+ pool) / **SQLAlchemy** | Async Postgres access and repositories (insert-only evidence repo) |
 | **httpx** + **tenacity** | Outbound HTTP for search and fetch, with retry/backoff |
@@ -612,6 +584,42 @@ Jury/
 ├── .env.example
 └── LICENSE
 ```
+
+---
+
+## 🔑 Bring your own key
+
+> **The Jury ships with no API keys. You bring your own.**
+
+Every LLM call and every search runs on **your** accounts, under **your** quotas and billing. Nothing is proxied through a shared key, and keys never leave your environment: they are read from `apps/api/.env` on your machine or server, are gitignored, and are never sent to the browser.
+
+| Key | Get it from | Needed for | Free tier |
+|---|---|---|---|
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com/keys) | All LLM calls | Yes |
+| `BRAVE_API_KEY` | [brave.com/search/api](https://brave.com/search/api/) | Web search for every chair | Yes |
+| `TAVILY_API_KEY` | [tavily.com](https://tavily.com/) | Market chair search | Yes |
+| `EXA_API_KEY` | [exa.ai](https://exa.ai/) | Precedent find-similar | Trial credits |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) | Extra Customer evidence (optional) | Yes |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | [upstash.com](https://upstash.com/) | Caches and rate limits (optional) | Yes |
+
+**Three ways to run:**
+
+1. **No keys at all.** Keep `JURY_OFFLINE=1`. The pipeline and test suite run on recorded fixtures, which is ideal for exploring the code.
+2. **Just a Groq key.** Unset `JURY_OFFLINE` and add `GROQ_API_KEY`. HN Algolia and Wayback CDX need no key. A search provider without a key simply returns no results, so those chairs gather less evidence and the score shows lower coverage instead of the run failing.
+3. **Full keys.** Add the search keys for the richest evidence.
+
+**Choosing your models.** Point the three model roles at any Groq models your key can access:
+
+```bash
+GROQ_API_KEY=your-key-here
+LLM_MODEL_REASONING=groq/llama-3.3-70b-versatile
+LLM_MODEL_FAST=groq/llama-3.1-8b-instant
+LLM_MODEL_FALLBACK=groq/openai/gpt-oss-120b
+```
+
+> Groq is the only LLM provider wired up today. Calls go through LiteLLM, but the gateway currently passes `GROQ_API_KEY`, so using another provider needs a small change in `jury/llm/gateway.py`.
+>
+> Each run spends against your own quotas. Per-run budgets (35 search queries across the five chairs, a capped LLM budget, and cached fetches) keep usage small and predictable.
 
 ---
 
@@ -780,11 +788,11 @@ We would rather tell you than have you find out.
 - **No JavaScript rendering.** Extraction is trafilatura → Jina Reader. The planned Playwright tier was cut, so some JS-heavy pricing pages won't yield evidence.
 - **Non-ASCII (IDN) hostnames are rejected** by the SSRF guard. That is a deliberate security trade-off that costs some sources.
 - **DNS rebinding is out of scope** for the SSRF guard, which does not resolve DNS.
-- **Sources decay.** Evidence is a snapshot at fetch time; scheduled re-verification is on the roadmap.
+- **Sources decay.** Evidence is a snapshot at fetch time and is not re-verified automatically.
 
 **About the models**
 - **Open-weight models make structuring mistakes.** The repair loop drops claims it can't validate, so some real evidence is lost rather than stored malformed.
-- **One LLM provider (Groq) is a single point of failure.** It is mitigated by the in-provider fallback chain, response caching and a one-line `LLM_PROVIDER` override, but not eliminated.
+- **One LLM provider (Groq) is a single point of failure.** It is mitigated by the in-provider fallback chain and response caching, but not eliminated.
 - **The model still writes prose** for cross-examination and the verdict rationale. The *decisions* are computed, but the explanatory text can be imperfect.
 
 **About scope (cut for the build window and recorded in the changelog)**
@@ -795,22 +803,6 @@ We would rather tell you than have you find out.
 - The backtest is planned at **n = 3** companies and will be reported as such, which is not statistically meaningful.
 - `POST /runs/{id}/cancel` records the cancellation but doesn't yet stop an in-flight coroutine.
 - Sessions are anonymous Supabase sessions. Accounts, teams and sharing are out of scope.
-
----
-
-## 🗺️ Roadmap
-
-| Horizon | Item | Why |
-|---|---|---|
-| **Next** | Deploy (Cloud Run + Vercel) and publish the backtest | Make it usable without local setup; test our own judgement |
-| **Next** | Compounding precedent corpus | Every verified precedent enriches future runs across users |
-| **Next** | Scheduled re-verification | Re-fetch tier-1 sources and flag evidence that changed |
-| **Next** | Playwright render tier | Reach JS-rendered pricing pages |
-| **Mid** | Read-only investor ledger links | Turns the case file into a diligence artifact |
-| **Mid** | Accelerator / cohort mode | Batch validation with aggregate coverage |
-| **Mid** | Experiment integrations | Pull results from analytics and payment providers automatically |
-| **Later** | Region-specific regulatory packs | Make the Dependencies chair stronger per jurisdiction |
-| **Later** | Calibration loop | Fit confidence weights against real project outcomes |
 
 ---
 
